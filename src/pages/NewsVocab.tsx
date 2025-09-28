@@ -18,6 +18,7 @@ import {
 
 const WEAK_TOPIC_ID = -1 as const;
 const LIMIT_PAIRS = 20;
+const COOLDOWN_N = 1;
 
 const MENU_ID_SNAKE = "news_vocab"; // サーバー側（Supabase）で使ってきた想定
 const MENU_ID_KEBAB = "news-vocab"; // ローカルや旧実装で保存されていた可能性
@@ -147,6 +148,20 @@ export default function NewsVocab() {
   >({});
 
   // ---- セッション計測 ----
+  const recentRef = useRef<number[]>([]);
+  const pushRecent = (id: number | null) => {
+    if (id == null) return;
+    const arr = recentRef.current;
+    // 連続で同じIDを複数回入れない（重複は末尾に寄せたい場合は一度除去）
+    const idx = arr.indexOf(id);
+    if (idx !== -1) arr.splice(idx, 1);
+    arr.push(id);
+    // 最大長を維持
+    while (arr.length > COOLDOWN_N) arr.shift();
+  };
+  const clearRecent = () => {
+    recentRef.current = [];
+  };
   const sessionStartRef = useRef<number | null>(null);
   useEffect(() => {
     (async () => {
@@ -234,6 +249,7 @@ export default function NewsVocab() {
           );
           const limited = data.slice(0, LIMIT_PAIRS); // 念のためダブルセーフ
           setPairs(limited);
+          clearRecent();
 
           // stats 初期化
           const next: Record<number, { JA2FR: Stat; FR2JA: Stat }> = {};
@@ -256,7 +272,7 @@ export default function NewsVocab() {
         const data = await loadLocalPairs(selectedTopicId);
         const limited = data.slice(0, LIMIT_PAIRS); // ★ 20件に制限
         setPairs(limited);
-
+        clearRecent();
         const next: Record<number, { JA2FR: Stat; FR2JA: Stat }> = {};
         for (const p of limited) {
           // ★ limited を使う
@@ -306,7 +322,7 @@ export default function NewsVocab() {
 
       const limited = (data ?? []).slice(0, LIMIT_PAIRS); // ★ 20件に制限
       setPairs(limited);
-
+      clearRecent();
       const zeroInit = () => {
         const next: Record<number, { JA2FR: Stat; FR2JA: Stat }> = {};
         for (const p of limited) {
@@ -420,9 +436,44 @@ export default function NewsVocab() {
 
   const goNextPrioritized = () => {
     if (pairs.length === 0) return;
+
+    // まずは既存の優先度順を作る
     const order = sortedIndices();
-    const next = order.find((i) => i !== idx) ?? idx;
-    setIdx(next);
+
+    // 直近履歴に含まれず、かつ現在と異なる index を候補化
+    const recentIds = new Set(recentRef.current);
+    const baseCandidates = order.filter((i) => {
+      const id = pairs[i]?.id;
+      return i !== idx && id != null && !recentIds.has(id);
+    });
+
+    let nextIdx: number | null = null;
+
+    if (baseCandidates.length > 0) {
+      nextIdx = baseCandidates[0];
+    } else {
+      // すべてクールダウンに引っかかった場合は、古い順に履歴を緩めて候補を探す
+      const relax = [...recentRef.current]; // 古い→新しい
+      while (relax.length > 0 && nextIdx == null) {
+        relax.shift(); // 1つ緩める
+        const relaxedSet = new Set(relax);
+        const cands = order.filter((i) => {
+          const id = pairs[i]?.id;
+          return i !== idx && id != null && !relaxedSet.has(id);
+        });
+        if (cands.length > 0) nextIdx = cands[0];
+      }
+      // それでも見つからない（= ペア数が極端に少ない等）場合の最終フォールバック
+      if (nextIdx == null) {
+        nextIdx = order.find((i) => i !== idx) ?? idx;
+      }
+    }
+
+    // 現在カードを履歴に積んでから遷移
+    const currentId = pairs[idx]?.id ?? null;
+    pushRecent(currentId);
+
+    setIdx(nextIdx);
     setRevealed(false);
   };
 
@@ -433,6 +484,7 @@ export default function NewsVocab() {
   };
   const onNext = () => {
     if (idx < pairs.length - 1) {
+      pushRecent(pairs[idx]?.id ?? null);
       setIdx((v) => v + 1);
       setRevealed(false);
     } else {

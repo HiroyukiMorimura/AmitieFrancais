@@ -1,7 +1,4 @@
-// src/lib/metrics.ts
-// v2: snake_case の menuId を採用（supaMetrics に合わせる）
-
-export type LocalModuleId =
+export type UIModuleId =
   | "news-vocab"
   | "nominalisation"
   | "verb-gym"
@@ -11,7 +8,7 @@ export type LocalModuleId =
 export type Attempt = {
   id: string;
   userId: string;
-  moduleId: LocalModuleId; // ← ここも LocalModuleId に
+  moduleId: UIModuleId;
   skillTags: string[];
   correct: boolean;
   ts: number;
@@ -20,7 +17,7 @@ export type Attempt = {
     [key: string]: unknown;
   };
 };
-export const MODULE_IDS: LocalModuleId[] = [
+export const MODULE_IDS: UIModuleId[] = [
   "news-vocab",
   "nominalisation",
   "verb-gym",
@@ -69,16 +66,14 @@ export function clearUserData(userId: string) {
 
 type ModuleStat = { total: number; correct: number };
 
-function zeroModuleStats(): Record<LocalModuleId, ModuleStat> {
+function zeroModuleStats(): Record<UIModuleId, ModuleStat> {
   return MODULE_IDS.reduce((acc, m) => {
     acc[m] = { total: 0, correct: 0 };
     return acc;
-  }, {} as Record<LocalModuleId, ModuleStat>);
+  }, {} as Record<UIModuleId, ModuleStat>);
 }
 
-export function getModuleStats(
-  userId: string
-): Record<LocalModuleId, ModuleStat> {
+export function getModuleStats(userId: string): Record<UIModuleId, ModuleStat> {
   const rows = load(userId);
   const by = zeroModuleStats();
   for (const a of rows) {

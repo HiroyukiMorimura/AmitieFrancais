@@ -63,12 +63,32 @@ export default function Futsuken() {
           .map((l) => l.trim())
           .filter((l) => l && !l.startsWith("#"));
 
+        const normalizePrompt = (raw: string) => {
+          // 1) 先頭/末尾の引用符を除去
+          let s = raw.replace(/^"+/, "").replace(/"+$/, "");
+
+          // 2) 最初の半角スペースの直後で改行
+          const i = s.indexOf(" ");
+          if (i >= 0) {
+            s = s.slice(0, i) + "\n" + s.slice(i + 1);
+          }
+
+          // 3) "B:" / "B：" があれば、その直前で改行
+          s = s.replace(/ ?(?=B\s*[:：])/g, "\n");
+          return s;
+        };
+
+        // TSV → Item[]
         const parsed: Item[] = lines.map((l, i) => {
           const cols = l.split("\t");
-          const prompt = (cols[0] ?? "").trim();
-          const answer = (cols[1] ?? "").trim(); // 第2列を答えとして全文扱う
+
+          const promptRaw = (cols[0] ?? "").trim();
+          const prompt = normalizePrompt(promptRaw);
+
+          const answer = (cols[1] ?? "").trim();
           const note =
             cols.length > 2 ? cols.slice(2).join(" / ").trim() : undefined;
+
           return { id: i + 1, prompt, answer, note };
         });
 
@@ -148,7 +168,7 @@ export default function Futsuken() {
     // Supabase（学習イベント）
     try {
       await recordAttempt({
-        moduleId: "futsuken",
+        menuId: "futsuken",
         isCorrect: ok,
         itemId: item.id, // 将来DB化時は futsuken_items.id を入れる
         skillTags: [], // 例: ["exam:futsuken:lexique"]

@@ -1,7 +1,7 @@
 // src/pages/Hub.tsx
 import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
-import { getModuleStats, getReport } from "../lib/metrics";
+import { getModuleStats } from "../lib/metrics";
 
 export default function Hub() {
   const { user, loading, logout } = useAuth();
@@ -19,7 +19,7 @@ export default function Hub() {
 
   const uid = user.id;
   const mod = getModuleStats(uid);
-  const rep = getReport(uid);
+  // const rep = getReport(uid);
 
   const StatBadge = ({
     label,
@@ -250,7 +250,7 @@ export default function Hub() {
           />
         </div>
 
-        {/* 弱点ハイライト */}
+        {/* 弱点ハイライト
         <section className="mt-10">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold">
@@ -292,7 +292,7 @@ export default function Hub() {
               ))}
             </ul>
           )}
-        </section>
+        </section> */}
       </main>
     </div>
   );

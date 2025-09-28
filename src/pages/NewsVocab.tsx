@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-
 import { supabase } from "../lib/supabase";
 
 import {
@@ -11,14 +10,86 @@ import {
   getCountsForItems as getCountsForItemsSrv,
 } from "../lib/metricsClient";
 
-import { getAllAttempts } from "../lib/metrics";
+import {
+  listLocalTopics,
+  isLocalTopicId,
+  loadLocalPairs,
+} from "../lib/localNewsSets";
 
 const WEAK_TOPIC_ID = -1 as const;
+const LIMIT_PAIRS = 20;
+
+const MENU_ID_SNAKE = "news_vocab"; // サーバー側（Supabase）で使ってきた想定
+const MENU_ID_KEBAB = "news-vocab"; // ローカルや旧実装で保存されていた可能性
+const MENU_ID = MENU_ID_SNAKE; // 今後の保存はこれに統一
+
+// 上部の import 群の下あたりに追加
+async function loadWeakPairsFromSupabase(
+  limitTopics = 50,
+  limitPairsPerTopic = 200,
+  pickTop = 50
+): Promise<Pair[]> {
+  // 1) 直近トピックを取得（多すぎ防止のため上限）
+  const { data: topicsData, error: topicsErr } = await supabase
+    .from("topics")
+    .select("id")
+    .order("id", { ascending: false })
+    .limit(limitTopics);
+  if (topicsErr || !topicsData?.length) return [];
+
+  // 2) 各トピックから語彙を取得（上限つき）
+  const topicIds = topicsData.map((t) => t.id);
+  const { data: pairsData, error: pairsErr } = await supabase
+    .from("vocab_pairs")
+    .select("id, ja, fr, topic_id")
+    .in("topic_id", topicIds)
+    .order("id", { ascending: true })
+    .limit(limitTopics * limitPairsPerTopic); // サーバ側上限に注意
+  if (pairsErr || !pairsData?.length) return [];
+
+  // 3) 正誤を取得
+  const allIds = pairsData.map((p) => p.id);
+  let countsMap: Map<number, Stat> = new Map();
+  try {
+    countsMap = await getCountsForItemsSrv("news_vocab", allIds);
+  } catch (e) {
+    console.warn("[getCountsForItemsSrv] failed for weak view:", e);
+    // 失敗時はゼロ扱い
+    countsMap = new Map(allIds.map((id) => [id, { correct: 0, wrong: 0 }]));
+  }
+
+  // 4) スコアリング：未出題→正解0→正答率低い（昇順）→試行回数少→間違い多
+  type Scored = Pair & { _score: [number, number, number, number] }; // tuple sort
+  const scored: Scored[] = pairsData.map((p) => {
+    const s = countsMap.get(p.id) ?? { correct: 0, wrong: 0 };
+    const attempts = s.correct + s.wrong;
+    const unseen = attempts === 0 ? 0 : 1; // 未出題優先（0が先）
+    const zeroCorrect = s.correct === 0 ? 0 : 1; // 正解0優先
+    const acc = attempts ? s.correct / attempts : 0; // 正答率（低いほうが先）
+    const tieAttempts = attempts; // 少ないほうが先
+    // tuple: [未出題, 正解0, 正答率, 試行回数] で昇順
+    return {
+      id: p.id,
+      ja: p.ja,
+      fr: p.fr,
+      _score: [unseen, zeroCorrect, acc, tieAttempts],
+    };
+  });
+
+  scored.sort((a, b) => {
+    for (let i = 0; i < a._score.length; i++) {
+      if (a._score[i] !== b._score[i]) return a._score[i] - b._score[i];
+    }
+    return a.id - b.id;
+  });
+
+  return scored.slice(0, pickTop).map(({ id, ja, fr }) => ({ id, ja, fr }));
+}
 
 type Topic = {
   id: number;
-  big_category: string;
-  subtopic: string;
+  big_category: string; // 大項目（フォルダ or DBのカテゴリー）
+  subtopic: string; // 小項目（ファイル1行目の「…」or DBのサブトピック）
   created_at: string;
 };
 
@@ -35,7 +106,6 @@ export default function NewsVocab() {
   // ---- 認証状態（uid） ----
   const [uid, setUid] = useState<string | null>(null);
   useEffect(() => {
-    // 初期セッション取得
     supabase.auth.getSession().then((res) => {
       setUid(res.data.session?.user?.id ?? null);
       console.log(
@@ -43,7 +113,6 @@ export default function NewsVocab() {
         res.data.session?.user?.id ?? null
       );
     });
-    // 変化を監視
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setUid(session?.user?.id ?? null);
       console.log(
@@ -60,11 +129,12 @@ export default function NewsVocab() {
 
   // ---- UI/データ状態 ----
   const [topics, setTopics] = useState<Topic[]>([]);
-  const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null);
+  const [selectedBigCat, setSelectedBigCat] = useState<string | null>(null); // ★ 大項目
+  const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null); // ★ 小項目（Topic.id）
   const [pairs, setPairs] = useState<Pair[]>([]);
   const [loadingTopics, setLoadingTopics] = useState(true);
   const [loadingPairs, setLoadingPairs] = useState(false);
-  const [mode, setMode] = useState<"drill" | "list">("drill"); // デフォ：ドリル
+  const [mode, setMode] = useState<"drill" | "list">("drill");
   const [dir, setDir] = useState<DrillDir>("JA2FR");
 
   // ドリル状態
@@ -76,7 +146,7 @@ export default function NewsVocab() {
     Record<number, { JA2FR: Stat; FR2JA: Stat }>
   >({});
 
-  // ---- セッション計測（useRefで確実にクリーンアップ） ----
+  // ---- セッション計測 ----
   const sessionStartRef = useRef<number | null>(null);
   useEffect(() => {
     (async () => {
@@ -86,121 +156,140 @@ export default function NewsVocab() {
     return () => {
       void endSession("news_vocab", sessionStartRef.current);
     };
-  }, []); // ← 依存なし（マウント/アンマウント1回だけ）
+  }, []);
 
-  // トピック取得（新しい順）
+  // ---- トピック取得（ローカル＋Supabase） ----
   useEffect(() => {
     (async () => {
       setLoadingTopics(true);
+
+      const special = {
+        id: WEAK_TOPIC_ID,
+        big_category: "特集",
+        subtopic: "頑張ろう🎉",
+        created_at: "",
+      } as const;
+
+      // ① ローカル
+      const locals = listLocalTopics(); // /src/data/news-sets/** をトピック化（大項目=フォルダ、小項目=1行目）
+
+      // ② Supabase
       const { data, error } = await supabase
         .from("topics")
         .select("id, big_category, subtopic, created_at")
         .order("id", { ascending: false });
 
-      if (error) {
-        console.error("[topics]", error);
-      } else if (data) {
-        // 疑似トピックを追加
-        const special = {
-          id: WEAK_TOPIC_ID,
-          big_category: "特集",
-          subtopic: "苦手な単語",
-          created_at: "",
-        } satisfies Topic;
-        setTopics([special, ...data]);
+      const remotes = error || !data ? [] : data;
 
-        // 既定は「最新の通常トピック」にしておく（お好みで special.id にしてもOK）
-        if (data.length > 0) setSelectedTopicId(data[0].id);
-      }
+      // 表示順は [特集, ローカル, リモート] とする（必要なら並び替え可）
+      const merged = [special as Topic, ...locals, ...remotes];
+      setTopics(merged);
+
+      // 初期の大項目を決める（先頭の大項目）
+      setSelectedBigCat((prev) => prev ?? merged[0]?.big_category ?? null);
+
       setLoadingTopics(false);
     })();
   }, []);
 
-  // 選択トピックの語彙ペア取得＋（ログイン時のみ）サーバー集計読み込み＋前回の続き復元
+  // ---- 大項目ごとのグルーピング ----
+  const groupedByBigCat = useMemo(() => {
+    const map = new Map<string, Topic[]>();
+    for (const t of topics) {
+      if (!map.has(t.big_category)) map.set(t.big_category, []);
+      map.get(t.big_category)!.push(t);
+    }
+    // 小項目は日本語の辞書順で
+    for (const [k, arr] of map) {
+      arr.sort((a, b) => a.subtopic.localeCompare(b.subtopic, "ja"));
+      map.set(k, arr);
+    }
+    return map;
+  }, [topics]);
+
+  const visibleSubtopics = useMemo(() => {
+    if (!selectedBigCat) return [];
+    return groupedByBigCat.get(selectedBigCat) ?? [];
+  }, [groupedByBigCat, selectedBigCat]);
+
+  // 大項目が変わったら小項目とペア表示をクリア
+  useEffect(() => {
+    setSelectedTopicId(null);
+    setPairs([]);
+    setIdx(0);
+    setRevealed(false);
+  }, [selectedBigCat]);
+
+  // ---- 小項目選択時：語彙ペア＋統計のロード ----
   useEffect(() => {
     if (!selectedTopicId) return;
     (async () => {
       setLoadingPairs(true);
-
-      // ★ 苦手な単語（特集モード）
       if (selectedTopicId === WEAK_TOPIC_ID) {
         try {
-          // すべての語彙を取る（id, ja, fr）
-          const { data: allPairs, error: e1 } = await supabase
-            .from("vocab_pairs")
-            .select("id, ja, fr")
-            .order("id", { ascending: true });
-
-          if (e1 || !allPairs) throw e1;
-
-          // ローカル記録から itemId ごとの正誤を集計（news_vocabのみ）
-          const attempts = getAllAttempts(uid ?? "local").filter(
-            (a) =>
-              a.moduleId === "news-vocab" && typeof a.meta?.itemId === "number"
+          const data = await loadWeakPairsFromSupabase(
+            /* limitTopics */ 50,
+            /* perTopic */ 200,
+            /* pickTop */ LIMIT_PAIRS
           );
+          const limited = data.slice(0, LIMIT_PAIRS); // 念のためダブルセーフ
+          setPairs(limited);
 
-          const per = new Map<number, { correct: number; wrong: number }>();
-          for (const a of attempts) {
-            const id = a.meta!.itemId as number;
-            const prev = per.get(id) ?? { correct: 0, wrong: 0 };
-            per.set(id, {
-              correct: prev.correct + (a.correct ? 1 : 0),
-              wrong: prev.wrong + (a.correct ? 0 : 1),
-            });
-          }
-
-          // 未学習(=attempts=0)は除外。並び：正解0かつ wrong多い順 → それ以外は正答率低い順
-          const rankedIds = [...per.entries()]
-            .filter(([, s]) => s.correct + s.wrong > 0) // ← [, s] としてキーを無視
-            .sort(([, a], [, b]) => {
-              // ← [, a], [, b] として値だけ使う
-              const aZero = a.correct === 0;
-              const bZero = b.correct === 0;
-              if (aZero !== bZero) return aZero ? -1 : 1; // 正解0が先
-              if (aZero && bZero) {
-                if (a.wrong !== b.wrong) return b.wrong - a.wrong;
-              } else {
-                const accA = a.correct / (a.correct + a.wrong);
-                const accB = b.correct / (b.correct + b.wrong);
-                if (accA !== accB) return accA - accB;
-              }
-              const triesA = a.correct + a.wrong;
-              const triesB = b.correct + b.wrong;
-              if (a.wrong !== b.wrong) return b.wrong - a.wrong;
-              if (triesA !== triesB) return triesB - triesA;
-              return 0;
-            })
-            .map(([id]) => id);
-
-          const topIds = rankedIds.slice(0, 10);
-          const byId = new Map(allPairs.map((p) => [p.id, p]));
-          const topPairs = topIds
-            .map((id) => byId.get(id))
-            .filter(Boolean) as Pair[];
-
-          setPairs(topPairs);
-
-          // stats をローカル集計で初期化（どちらの dir にも同値を入れておく）
+          // stats 初期化
           const next: Record<number, { JA2FR: Stat; FR2JA: Stat }> = {};
-          for (const id of topIds) {
-            const s = per.get(id) ?? { correct: 0, wrong: 0 };
-            next[id] = { JA2FR: { ...s }, FR2JA: { ...s } };
+          for (const p of limited) {
+            next[p.id] = {
+              JA2FR: { correct: 0, wrong: 0 },
+              FR2JA: { correct: 0, wrong: 0 },
+            };
           }
           setStats(next);
-
           setIdx(0);
           setRevealed(false);
-        } catch (e) {
-          console.error("[weak-items]", e);
-          setPairs([]);
         } finally {
           setLoadingPairs(false);
         }
-        return; // ← ここで終了（通常分岐へ進まない）
+        return; // ← ここで早期リターン（以降のローカル/通常処理へ行かない）
+      }
+      // ローカルトピック
+      if (isLocalTopicId(selectedTopicId)) {
+        const data = await loadLocalPairs(selectedTopicId);
+        const limited = data.slice(0, LIMIT_PAIRS); // ★ 20件に制限
+        setPairs(limited);
+
+        const next: Record<number, { JA2FR: Stat; FR2JA: Stat }> = {};
+        for (const p of limited) {
+          // ★ limited を使う
+          next[p.id] = {
+            JA2FR: { correct: 0, wrong: 0 },
+            FR2JA: { correct: 0, wrong: 0 },
+          };
+        }
+        setStats(next);
+
+        if (uid) {
+          try {
+            const prog = await loadProgressSrv("news_vocab", {
+              topic_id: selectedTopicId,
+              dir,
+            });
+            if (prog?.last_item_id) {
+              const i = data.findIndex((x) => x.id === prog.last_item_id);
+              if (i >= 0) setIdx(i);
+            } else {
+              setIdx(0);
+            }
+            setRevealed(false);
+          } catch (e) {
+            console.warn("[loadProgress failed]", e);
+          }
+        }
+
+        setLoadingPairs(false);
+        return;
       }
 
-      // ★ 通常トピック（元の処理）
-      // 1) 語彙取得
+      // Supabase の通常トピック
       const { data, error } = await supabase
         .from("vocab_pairs")
         .select("id, ja, fr")
@@ -215,10 +304,13 @@ export default function NewsVocab() {
       }
       setPairs(data);
 
-      // 2) stats の初期化
+      const limited = (data ?? []).slice(0, LIMIT_PAIRS); // ★ 20件に制限
+      setPairs(limited);
+
       const zeroInit = () => {
         const next: Record<number, { JA2FR: Stat; FR2JA: Stat }> = {};
-        for (const p of data) {
+        for (const p of limited) {
+          // ★ limited を使う
           next[p.id] = {
             JA2FR: { correct: 0, wrong: 0 },
             FR2JA: { correct: 0, wrong: 0 },
@@ -231,14 +323,13 @@ export default function NewsVocab() {
         zeroInit();
       } else {
         try {
-          const itemIds = data.map((p) => p.id);
-          const serverMap = await getCountsForItemsSrv("news-vocab", itemIds);
+          const itemIds = limited.map((p) => p.id);
+          const serverMap = await fetchCountsMerged(itemIds);
+
           const next: Record<number, { JA2FR: Stat; FR2JA: Stat }> = {};
-          for (const p of data) {
-            const s = serverMap.get(p.id);
-            const base: Stat = { correct: 0, wrong: 0 };
-            // 片方向集計しか持っていない前提なら、dir 両方に同じ値を入れてOK
-            next[p.id] = { JA2FR: s ?? base, FR2JA: s ?? base };
+          for (const p of limited) {
+            const s = serverMap.get(p.id) ?? { correct: 0, wrong: 0 };
+            next[p.id] = { JA2FR: s, FR2JA: s };
           }
           setStats(next);
         } catch (e) {
@@ -247,10 +338,9 @@ export default function NewsVocab() {
         }
       }
 
-      // 4) 続き復元（ログイン時のみ）
       if (uid) {
         try {
-          const prog = await loadProgressSrv("news-vocab", {
+          const prog = await loadProgressSrv("news_vocab", {
             topic_id: selectedTopicId,
             dir,
           });
@@ -270,6 +360,7 @@ export default function NewsVocab() {
     })();
   }, [selectedTopicId, dir, uid]);
 
+  // 選択中のTopic
   const selectedTopic = useMemo(
     () => topics.find((t) => t.id === selectedTopicId) ?? null,
     [topics, selectedTopicId]
@@ -279,15 +370,12 @@ export default function NewsVocab() {
   const card = pairs[idx] ?? null;
 
   // 出題優先
-  // 既存の attemptsOf は不要になるので削除OK
-
   const sortedIndices = () => {
     const statFor = (id: number) =>
       stats[id]?.[dir] ?? { correct: 0, wrong: 0 };
     const attempts = (s: { correct: number; wrong: number }) =>
       s.correct + s.wrong;
 
-    // まず、全カードが「正解>=1」かどうかを判定
     const allHaveAtLeastOneCorrect = pairs.every(
       (p) => (stats[p.id]?.[dir]?.correct ?? 0) >= 1
     );
@@ -295,36 +383,33 @@ export default function NewsVocab() {
     const indices = pairs.map((_, i) => i);
 
     if (!allHaveAtLeastOneCorrect) {
-      // フェーズ1: 未出題 → 正解0 の順で優先
+      // フェーズ1: 未出題 → 正解0 → タイブレーク
       return indices.sort((a, b) => {
         const sa = statFor(pairs[a].id);
         const sb = statFor(pairs[b].id);
-
         const aAttempts = attempts(sa);
         const bAttempts = attempts(sb);
         const aUnseen = aAttempts === 0;
         const bUnseen = bAttempts === 0;
-        if (aUnseen !== bUnseen) return aUnseen ? -1 : 1; // 未出題が先
+        if (aUnseen !== bUnseen) return aUnseen ? -1 : 1;
 
         const aZeroCorrect = sa.correct === 0;
         const bZeroCorrect = sb.correct === 0;
-        if (aZeroCorrect !== bZeroCorrect) return aZeroCorrect ? -1 : 1; // 正解0が先
+        if (aZeroCorrect !== bZeroCorrect) return aZeroCorrect ? -1 : 1;
 
-        // タイブレーク: 試行回数が少ない → 間違いが多い → インデックス
         if (aAttempts !== bAttempts) return aAttempts - bAttempts;
         if (sa.wrong !== sb.wrong) return sb.wrong - sa.wrong;
         return a - b;
       });
     } else {
-      // フェーズ2: 全カードが正解>=1 になったら正答率の高い順（降順）
+      // フェーズ2: 正答率の低い順（上げていく）
       return indices.sort((a, b) => {
         const sa = statFor(pairs[a].id);
         const sb = statFor(pairs[b].id);
         const accA = sa.correct / Math.max(1, sa.correct + sa.wrong);
         const accB = sb.correct / Math.max(1, sb.correct + sb.wrong);
-        if (accA !== accB) return accA - accB; // 低い順
+        if (accA !== accB) return accA - accB;
 
-        // タイブレーク: 試行回数が少ない → インデックス
         const aAttempts = sa.correct + sa.wrong;
         const bAttempts = sb.correct + sb.wrong;
         if (aAttempts !== bAttempts) return aAttempts - bAttempts;
@@ -359,7 +444,6 @@ export default function NewsVocab() {
   const mark = async (kind: "correct" | "wrong") => {
     if (!card) return;
 
-    // セッション内統計（即時UI反映）
     setStats((prev) => {
       const cur = prev[card.id] ?? {
         JA2FR: { correct: 0, wrong: 0 },
@@ -373,16 +457,15 @@ export default function NewsVocab() {
       return { ...prev, [card.id]: { ...cur, [dir]: updated } };
     });
 
-    // ② サーバー記録（既存）
     try {
       await recordAttemptSrv({
-        menuId: "news_vocab",
+        menuId: MENU_ID,
         isCorrect: kind === "correct",
         itemId: card.id,
-        skillTags: [], // サーバー用（任意）
+        skillTags: [],
         meta: { dir },
         alsoLocal: {
-          userId: uid ?? "local", // ローカル記録（UI即時反映 & レポート用）
+          userId: uid ?? "local",
           localSkillTags: [
             "vocab:news",
             `topic:${selectedTopicId ?? "?"}`,
@@ -395,18 +478,39 @@ export default function NewsVocab() {
     }
     goNextPrioritized();
   };
+  // counts の取得: snake/kebab の両方を読んでマージ（dir も渡せるなら渡す）
+  async function fetchCountsMerged(itemIds: number[]) {
+    const mapSnake = await getCountsForItemsSrv(MENU_ID_SNAKE, itemIds).catch(
+      () => new Map<number, Stat>()
+    );
+    const mapKebab = await getCountsForItemsSrv(MENU_ID_KEBAB, itemIds).catch(
+      () => new Map<number, Stat>()
+    );
 
-  // カード or 方向が変わるたび進捗を保存（ログイン時のみ）
+    // マージ（単純加算）
+    const merged = new Map<number, Stat>();
+    for (const id of itemIds) {
+      const a = mapSnake.get(id) ?? { correct: 0, wrong: 0 };
+      const b = mapKebab.get(id) ?? { correct: 0, wrong: 0 };
+      merged.set(id, {
+        correct: a.correct + b.correct,
+        wrong: a.wrong + b.wrong,
+      });
+    }
+    return merged;
+  }
+
+  // 進捗保存（ログイン時）
   useEffect(() => {
     if (!card || !selectedTopicId || !uid) return;
     void saveProgressSrv({
-      moduleId: "news-vocab",
+      moduleId: "news_vocab",
       context: { topic_id: selectedTopicId, dir },
       lastItemId: card.id,
     });
   }, [card, dir, selectedTopicId, uid]);
 
-  // セッション内合計（ヘッダー表示用・任意）
+  // セッション内合計（ヘッダー表示）
   const totalCorrect = useMemo(
     () =>
       Object.values(stats).reduce(
@@ -440,7 +544,7 @@ export default function NewsVocab() {
           </div>
 
           <div className="flex gap-2">
-            {/* モード切替（ドリル先行） */}
+            {/* モード切替 */}
             <div className="inline-flex rounded-xl border bg-white shadow-sm overflow-hidden">
               <button
                 className={`px-3 py-1.5 text-sm ${
@@ -501,9 +605,11 @@ export default function NewsVocab() {
 
       {/* 本文 */}
       <main className="mx-auto max-w-5xl px-4 py-6">
-        {/* トピック選択 */}
+        {/* トピック選択（大項目→小項目） */}
         <section>
           <label className="block text-sm text-slate-600">トピック</label>
+
+          {/* 大項目（カテゴリ） */}
           <div className="mt-2 flex flex-wrap gap-2">
             {loadingTopics && (
               <span className="text-slate-500">読み込み中…</span>
@@ -511,22 +617,53 @@ export default function NewsVocab() {
             {!loadingTopics && topics.length === 0 && (
               <span className="text-slate-500">トピックがありません</span>
             )}
-            {topics.map((t) => {
-              const active = t.id === selectedTopicId;
+            {[...new Set(topics.map((t) => t.big_category))].map((cat) => {
+              const active = cat === selectedBigCat;
+              const isSpecial = cat === "特集";
+
               return (
                 <button
-                  key={t.id}
-                  className={`chip ${active ? "ring-2 ring-rose-200" : ""}`}
-                  onClick={() => setSelectedTopicId(t.id)}
+                  key={cat}
+                  className={[
+                    "chip",
+                    active ? "ring-2 ring-rose-200" : "",
+                    isSpecial
+                      ? "bg-yellow-100 text-yellow-800 border-yellow-300"
+                      : "",
+                  ].join(" ")}
+                  onClick={() => setSelectedBigCat(cat)}
+                  title={isSpecial ? "特集" : cat}
+                  aria-label={isSpecial ? "特集" : cat}
                 >
-                  <span className="text-xs text-slate-500">
-                    {t.big_category}
-                  </span>
-                  <span className="font-medium">{t.subtopic}</span>
+                  <span className="font-medium">{cat}</span>
                 </button>
               );
             })}
           </div>
+
+          {/* 小項目（サブトピック） */}
+          {selectedBigCat && (
+            <>
+              <div className="mt-4 text-xs text-slate-500">
+                {selectedBigCat} の小項目
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {visibleSubtopics.map((t) => {
+                  const active = t.id === selectedTopicId;
+                  return (
+                    <button
+                      key={t.id}
+                      className={`chip ${active ? "ring-2 ring-blue-200" : ""}`}
+                      onClick={() => setSelectedTopicId(t.id)}
+                      title={`${t.big_category} — ${t.subtopic}`}
+                    >
+                      <span className="font-medium">{t.subtopic}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </section>
 
         {/* 概要 */}
@@ -534,8 +671,10 @@ export default function NewsVocab() {
           <div className="glass-card flex items-center justify-between">
             <div>
               <div className="text-sm text-slate-500">
-                {selectedTopic
-                  ? `${selectedTopic.big_category} — ${selectedTopic.subtopic}`
+                {selectedBigCat
+                  ? selectedTopic
+                    ? `${selectedBigCat} — ${selectedTopic.subtopic}`
+                    : `${selectedBigCat} — （小項目を選択してください）`
                   : "—"}
               </div>
               <div className="text-xs text-slate-500">
@@ -545,27 +684,33 @@ export default function NewsVocab() {
           </div>
         </section>
 
-        {/* モード別表示 */}
-        {mode === "list" ? (
-          <ListView pairs={pairs} loading={loadingPairs} stats={stats} />
+        {/* モード別表示（小項目未選択なら案内） */}
+        {selectedTopicId ? (
+          mode === "list" ? (
+            <ListView pairs={pairs} loading={loadingPairs} stats={stats} />
+          ) : (
+            <DrillView
+              card={card}
+              idx={idx}
+              total={pairs.length}
+              revealed={revealed}
+              setRevealed={setRevealed}
+              onPrev={onPrev}
+              onNext={onNext}
+              dir={dir}
+              stat={
+                card
+                  ? stats[card.id]?.[dir] ?? { correct: 0, wrong: 0 }
+                  : { correct: 0, wrong: 0 }
+              }
+              onCorrect={() => void mark("correct")}
+              onWrong={() => void mark("wrong")}
+            />
+          )
         ) : (
-          <DrillView
-            card={card}
-            idx={idx}
-            total={pairs.length}
-            revealed={revealed}
-            setRevealed={setRevealed}
-            onPrev={onPrev}
-            onNext={onNext}
-            dir={dir}
-            stat={
-              card
-                ? stats[card.id]?.[dir] ?? { correct: 0, wrong: 0 }
-                : { correct: 0, wrong: 0 }
-            }
-            onCorrect={() => void mark("correct")}
-            onWrong={() => void mark("wrong")}
-          />
+          <div className="mt-8 text-slate-500">
+            小項目を選択すると語彙が表示されます
+          </div>
         )}
       </main>
     </div>
@@ -599,8 +744,8 @@ function ListView({
             <div className="font-medium">{p.ja}</div>
             <div className="text-slate-600">{p.fr}</div>
             <div className="mt-1 text-xs text-slate-500">
-              日→仏: ✅ {s.JA2FR.correct} / ❌ {s.JA2FR.wrong}
-              仏→日: ✅ {s.FR2JA.correct} / ❌ {s.FR2JA.wrong}
+              日→仏: ✅ {s.JA2FR.correct} / ❌ {s.JA2FR.wrong} 仏→日: ✅{" "}
+              {s.FR2JA.correct} / ❌ {s.FR2JA.wrong}
             </div>
           </li>
         );
@@ -700,11 +845,6 @@ function DrillView({
           </button>
         </div>
       </div>
-
-      {/* <p className="mt-3 text-xs text-slate-500">
-        ※ 正誤は Supabase（learning_events）に保存。滞在時間は
-        study_sessions、進捗は user_progress に保存されます。
-      </p> */}
     </section>
   );
 }

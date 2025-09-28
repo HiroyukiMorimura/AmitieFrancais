@@ -1,5 +1,25 @@
-import { recordAttempt, Skill, type ModuleId } from "../../lib/metrics";
+// src/pages/stubs/ModuleStub.tsx
 import { useAuth } from "../../hooks/useAuth";
+import { recordAttempt } from "../../lib/metrics";
+
+// 本体（lib/metrics）のローカル保存は kebab-case の moduleId
+type ModuleId =
+  | "news-vocab"
+  | "nominalisation"
+  | "verb-gym"
+  | "freewrite"
+  | "futsuken";
+
+// スタブ用タグ定義（本体の Skill は最小構成なので、ここでだけ補完）
+const StubSkill = {
+  VocabNews: "vocab:news",
+  Nominalisation: "grammar:nominalisation",
+  VerbChoice: "verb:choice",
+  Conjugation: "verb:conjugation",
+  Agreement: "grammar:agreement",
+  Preposition: "grammar:preposition",
+  Article: "grammar:article",
+} as const;
 
 export default function ModuleStub({
   moduleId,
@@ -13,8 +33,12 @@ export default function ModuleStub({
   const { user } = useAuth();
 
   const log = (ok: boolean) => {
+    if (!user) {
+      alert("ログインしていません。");
+      return;
+    }
     recordAttempt({
-      userId: user!.id,
+      userId: user.id,
       moduleId,
       skillTags: defaultTags,
       correct: ok,
@@ -51,13 +75,13 @@ export default function ModuleStub({
   );
 }
 
-// 利便のためのエイリアス
+/* 便利エイリアス（呼び出し側の JSX を簡潔に） */
 export function NewsVocabStub() {
   return (
     <ModuleStub
       moduleId="news-vocab"
       title="① 時事単語"
-      defaultTags={[Skill.VocabNews]}
+      defaultTags={[StubSkill.VocabNews]}
     />
   );
 }
@@ -66,7 +90,7 @@ export function NominalisationStub() {
     <ModuleStub
       moduleId="nominalisation"
       title="② 名詞化ジム"
-      defaultTags={[Skill.Nominalisation]}
+      defaultTags={[StubSkill.Nominalisation]}
     />
   );
 }
@@ -75,7 +99,7 @@ export function VerbGymStub() {
     <ModuleStub
       moduleId="verb-gym"
       title="③ 動詞選択＋活用"
-      defaultTags={[Skill.VerbChoice, Skill.Conjugation]}
+      defaultTags={[StubSkill.VerbChoice, StubSkill.Conjugation]}
     />
   );
 }
@@ -84,7 +108,11 @@ export function FreewriteStub() {
     <ModuleStub
       moduleId="freewrite"
       title="④ 自由作文ループ"
-      defaultTags={[Skill.Agreement, Skill.Preposition, Skill.Article]}
+      defaultTags={[
+        StubSkill.Agreement,
+        StubSkill.Preposition,
+        StubSkill.Article,
+      ]}
     />
   );
 }

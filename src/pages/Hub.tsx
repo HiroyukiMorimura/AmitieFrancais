@@ -159,7 +159,7 @@ export default function Hub() {
             <div className="h-8 w-8 rounded-xl bg-rose-500 text-white grid place-items-center shadow">
               ✨
             </div>
-            <div className="font-bold">アミティエ フランス語学習</div>
+            <div className="font-bold">アミティエ フランス語学習アプリ</div>
           </div>
           <div className="flex items-center gap-2 text-sm">
             <Link to="/app/report" className="chip">

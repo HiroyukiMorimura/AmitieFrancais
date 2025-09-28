@@ -7,10 +7,12 @@ export default function Landing() {
       <header className="w-full border-b border-white/60/50 bg-white/70 backdrop-blur">
         <div className="w-full max-w-none px-[clamp(16px,4vw,64px)] py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="inline-grid place-items-center h-9 w-9 rounded-2xl bg-sky-100 text-sky-600 shadow-sm">
-              ✿
+            <div className="h-8 w-8 rounded-xl bg-rose-500 text-white grid place-items-center shadow">
+              ✨
+            </div>
+            <span className="text-lg font-bold">
+              アミティエ フランス語学習アプリ
             </span>
-            <span className="text-lg font-bold">Lingua</span>
           </div>
           {/* 見た目だけ。遷移しない */}
           <nav
@@ -49,12 +51,12 @@ export default function Landing() {
             <p className="mt-3 text-slate-700">
               毎日の「ちょっとだけ」を応援。
               <br />
-              時事単語と名詞化ドリルから始められます。
+              時事単語から開始できます。
             </p>
 
             <div className="mt-7 flex justify-center md:place-items-start">
               <Link to="/login" className="btn-primary btn-xl w-full sm:w-auto">
-                🌷 アプリを始める
+                🌷アプリを始める🌷
               </Link>
             </div>
 

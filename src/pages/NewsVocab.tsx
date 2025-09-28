@@ -51,7 +51,7 @@ async function loadWeakPairsFromSupabase(
   const allIds = pairsData.map((p) => p.id);
   let countsMap: Map<number, Stat> = new Map();
   try {
-    countsMap = await getCountsForItemsSrv("news_vocab", allIds);
+    countsMap = await getCountsForItemsSrv(MENU_ID_KEBAB, allIds);
   } catch (e) {
     console.warn("[getCountsForItemsSrv] failed for weak view:", e);
     // 失敗時はゼロ扱い
@@ -269,7 +269,7 @@ export default function NewsVocab() {
 
         if (uid) {
           try {
-            const prog = await loadProgressSrv("news_vocab", {
+            const prog = await loadProgressSrv(MENU_ID_KEBAB, {
               topic_id: selectedTopicId,
               dir,
             });
@@ -340,7 +340,7 @@ export default function NewsVocab() {
 
       if (uid) {
         try {
-          const prog = await loadProgressSrv("news_vocab", {
+          const prog = await loadProgressSrv(MENU_ID_KEBAB, {
             topic_id: selectedTopicId,
             dir,
           });
@@ -480,31 +480,17 @@ export default function NewsVocab() {
   };
   // counts の取得: snake/kebab の両方を読んでマージ（dir も渡せるなら渡す）
   async function fetchCountsMerged(itemIds: number[]) {
-    const mapSnake = await getCountsForItemsSrv(MENU_ID_SNAKE, itemIds).catch(
+    const map = await getCountsForItemsSrv(MENU_ID_KEBAB, itemIds).catch(
       () => new Map<number, Stat>()
     );
-    const mapKebab = await getCountsForItemsSrv(MENU_ID_KEBAB, itemIds).catch(
-      () => new Map<number, Stat>()
-    );
-
-    // マージ（単純加算）
-    const merged = new Map<number, Stat>();
-    for (const id of itemIds) {
-      const a = mapSnake.get(id) ?? { correct: 0, wrong: 0 };
-      const b = mapKebab.get(id) ?? { correct: 0, wrong: 0 };
-      merged.set(id, {
-        correct: a.correct + b.correct,
-        wrong: a.wrong + b.wrong,
-      });
-    }
-    return merged;
+    return map;
   }
 
   // 進捗保存（ログイン時）
   useEffect(() => {
     if (!card || !selectedTopicId || !uid) return;
     void saveProgressSrv({
-      moduleId: "news_vocab",
+      moduleId: MENU_ID_KEBAB,
       context: { topic_id: selectedTopicId, dir },
       lastItemId: card.id,
     });

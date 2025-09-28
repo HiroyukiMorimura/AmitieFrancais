@@ -24,6 +24,9 @@ export const MODULE_IDS: UIModuleId[] = [
   "freewrite",
   "futsuken",
 ];
+
+export type LocalModuleId = UIModuleId;
+
 const VERSION = "v2";
 const KEY = (userId: string) => `lingua_metrics_${VERSION}:${userId}`;
 

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Routes, Route, Link } from "react-router-dom";
-import { supabase } from "./lib/supabase"; // ★ supabaseクライアントを必ずimport
+import { supabase } from "./lib/supabase";
 
 import Landing from "./pages/Landing";
 import Signup from "./pages/Signup";
@@ -12,14 +12,11 @@ import NewsVocab from "./pages/NewsVocab";
 import StudyTime from "./pages/StudyTime";
 import Futsuken from "./pages/Futsuken";
 
-import {
-  NominalisationStub,
-  VerbGymStub,
-  FreewriteStub,
-} from "./pages/stubs/ModuleStub";
+import { VerbGymStub, FreewriteStub } from "./pages/stubs/ModuleStub";
+import Nominalisation from "./pages/Nominalisation";
+import Temps from "./pages/Temps";
 
 export default function App() {
-  // ★ ここでセッション確認・ログ出力
   useEffect(() => {
     supabase.auth.getSession().then((res) => {
       console.log(
@@ -81,10 +78,11 @@ export default function App() {
           path="/app/nominalisation"
           element={
             <ProtectedRoute>
-              <NominalisationStub />
+              <Nominalisation />
             </ProtectedRoute>
           }
         />
+
         <Route
           path="/app/verb-gym"
           element={
@@ -93,6 +91,16 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+
+        <Route
+          path="/app/temps"
+          element={
+            <ProtectedRoute>
+              <Temps />
+            </ProtectedRoute>
+          }
+        />
+
         <Route
           path="/app/freewrite"
           element={

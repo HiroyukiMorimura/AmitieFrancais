@@ -1,5 +1,7 @@
+// src/pages/NewsVocab.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
+import type { UIModuleId } from "../lib/metricsClient";
 
 import {
   startSession,
@@ -8,6 +10,7 @@ import {
   saveProgress as saveProgressSrv,
   loadProgress as loadProgressSrv,
   getCountsForItems as getCountsForItemsSrv,
+  getCountsForItemsByDir as getCountsForItemsByDirSrv,
 } from "../lib/metricsClient";
 
 import {
@@ -16,21 +19,190 @@ import {
   loadLocalPairs,
 } from "../lib/localNewsSets";
 
+import { useDrillHotkeys } from "../hooks/useDrillHotkeys";
+
 const WEAK_TOPIC_ID = -1 as const;
 const LIMIT_PAIRS = 20;
 const COOLDOWN_N = 1;
 
-const MENU_ID_SNAKE = "news_vocab"; // サーバー側（Supabase）で使ってきた想定
-const MENU_ID_KEBAB = "news-vocab"; // ローカルや旧実装で保存されていた可能性
-const MENU_ID = MENU_ID_SNAKE; // 今後の保存はこれに統一
+// 書き込みは snake に統一（過去データ互換のため）
+const MENU_ID_SNAKE = "news_vocab" as const;
+// 進捗・UI 系は kebab
+const UI_MODULE_ID: UIModuleId = "news-vocab";
 
-// 上部の import 群の下あたりに追加
+type Topic = {
+  id: number;
+  big_category: string;
+  subtopic: string;
+  created_at: string;
+};
+
+type Pair = {
+  id: number;
+  ja: string;
+  fr: string;
+};
+
+type DrillDir = "JA2FR" | "FR2JA";
+type Stat = { correct: number; wrong: number };
+type DirStat = { JA2FR: Stat; FR2JA: Stat };
+
+/** kebab / snake の両方を読み、ID ごとに合算して返す（any を使わない版） */
+async function fetchCountsMerged(itemIds: number[]) {
+  const add = (a?: Stat, b?: Stat): Stat => ({
+    correct: (a?.correct ?? 0) + (b?.correct ?? 0),
+    wrong: (a?.wrong ?? 0) + (b?.wrong ?? 0),
+  });
+
+  // kebab は UIModuleId にそのまま入る
+  const kebabMap = await getCountsForItemsSrv(UI_MODULE_ID, itemIds).catch(
+    () => new Map<number, Stat>()
+  );
+
+  // snake は型に含まれないので unknown → UIModuleId に二段キャスト
+  const SNAKE_AS_UI = MENU_ID_SNAKE as unknown as UIModuleId;
+  const snakeMap = await getCountsForItemsSrv(SNAKE_AS_UI, itemIds).catch(
+    () => new Map<number, Stat>()
+  );
+
+  const merged = new Map<number, Stat>();
+  for (const id of itemIds) {
+    merged.set(id, add(kebabMap.get(id), snakeMap.get(id)));
+  }
+  return merged;
+}
+
+/** kebab / snake の両方を読み、方向別（JA2FR/FR2JA）で合算して返す */
+async function fetchCountsByDirMerged(itemIds: number[], uid: string) {
+  const add = (a?: Stat, b?: Stat): Stat => ({
+    correct: (a?.correct ?? 0) + (b?.correct ?? 0),
+    wrong: (a?.wrong ?? 0) + (b?.wrong ?? 0),
+  });
+
+  const SNAKE_AS_UI = MENU_ID_SNAKE as unknown as UIModuleId;
+
+  const fetchOneSrv = async (moduleId: UIModuleId, dir: DrillDir) => {
+    try {
+      return await getCountsForItemsByDirSrv(moduleId, itemIds, dir);
+    } catch {
+      return new Map<number, Stat>();
+    }
+  };
+
+  // 1) まず既存サーバ集計（kebab/snake × 2方向）
+  const [kJA, kFR, sJA, sFR] = await Promise.all([
+    fetchOneSrv(UI_MODULE_ID, "JA2FR"),
+    fetchOneSrv(UI_MODULE_ID, "FR2JA"),
+    fetchOneSrv(SNAKE_AS_UI, "JA2FR"),
+    fetchOneSrv(SNAKE_AS_UI, "FR2JA"),
+  ]);
+
+  const mergedSrv = new Map<number, DirStat>();
+  for (const id of itemIds) {
+    const ja = add(kJA.get(id), sJA.get(id));
+    const fr = add(kFR.get(id), sFR.get(id));
+    if (ja.correct || ja.wrong || fr.correct || fr.wrong) {
+      mergedSrv.set(id, { JA2FR: ja, FR2JA: fr });
+    }
+  }
+  if (mergedSrv.size > 0) return mergedSrv;
+
+  // 2) フォールバック: attempts を直接集計（meta.dir or skill_tags の 'dir:XXX'）
+  type AttemptRow = {
+    item_id: number;
+    is_correct: boolean;
+    meta: Record<string, unknown> | null;
+    skill_tags: string[] | null;
+    menu_id: string;
+  };
+
+  const isRecord = (v: unknown): v is Record<string, unknown> =>
+    v !== null && typeof v === "object" && !Array.isArray(v);
+
+  const extractDir = (meta: unknown, skillTags: unknown): DrillDir | null => {
+    // meta.dir を優先
+    if (isRecord(meta)) {
+      const d = meta["dir"];
+      if (typeof d === "string") {
+        const up = d.toUpperCase();
+        if (up === "JA2FR") return "JA2FR";
+        if (up === "FR2JA") return "FR2JA";
+      }
+    }
+    // skill_tags の 'dir:XXX'
+    if (Array.isArray(skillTags)) {
+      const found = skillTags.find(
+        (s): s is string =>
+          typeof s === "string" && s.toUpperCase().startsWith("DIR:")
+      );
+      if (found) {
+        const up = found.split(":")[1]?.toUpperCase();
+        if (up === "JA2FR") return "JA2FR";
+        if (up === "FR2JA") return "FR2JA";
+      }
+    }
+    return null;
+  };
+
+  // ⬇️ ここをジェネリクス無しにして、戻り値に型を当てます
+  const { data, error } = await supabase
+    .from("attempts")
+    .select("item_id, is_correct, meta, skill_tags, menu_id")
+    .eq("user_id", uid)
+    .in("menu_id", [UI_MODULE_ID as unknown as string, MENU_ID_SNAKE])
+    .in("item_id", itemIds);
+
+  if (error) {
+    const zero = new Map<number, DirStat>();
+    for (const id of itemIds) {
+      zero.set(id, {
+        JA2FR: { correct: 0, wrong: 0 },
+        FR2JA: { correct: 0, wrong: 0 },
+      });
+    }
+    return zero;
+  }
+
+  // data に AttemptRow[] 型を適用（any は使わず unknown → 具体型に）
+  const rows: AttemptRow[] = (data ?? []) as unknown as AttemptRow[];
+
+  const out = new Map<number, DirStat>();
+  const ensure = (id: number) => {
+    if (!out.has(id)) {
+      out.set(id, {
+        JA2FR: { correct: 0, wrong: 0 },
+        FR2JA: { correct: 0, wrong: 0 },
+      });
+    }
+    return out.get(id)!;
+  };
+
+  for (const r of rows) {
+    const dir = extractDir(r.meta, r.skill_tags);
+    if (!dir) continue; // 方向不明はスキップ
+    const slot = ensure(r.item_id)[dir];
+    if (r.is_correct) slot.correct += 1;
+    else slot.wrong += 1;
+  }
+
+  // 全 id を必ず埋める
+  for (const id of itemIds) {
+    if (!out.has(id)) {
+      out.set(id, {
+        JA2FR: { correct: 0, wrong: 0 },
+        FR2JA: { correct: 0, wrong: 0 },
+      });
+    }
+  }
+  return out;
+}
+
+// 直近トピックから弱点（正答率が低い等）を上位抽出
 async function loadWeakPairsFromSupabase(
   limitTopics = 50,
   limitPairsPerTopic = 200,
   pickTop = 50
 ): Promise<Pair[]> {
-  // 1) 直近トピックを取得（多すぎ防止のため上限）
   const { data: topicsData, error: topicsErr } = await supabase
     .from("topics")
     .select("id")
@@ -38,37 +210,28 @@ async function loadWeakPairsFromSupabase(
     .limit(limitTopics);
   if (topicsErr || !topicsData?.length) return [];
 
-  // 2) 各トピックから語彙を取得（上限つき）
   const topicIds = topicsData.map((t) => t.id);
   const { data: pairsData, error: pairsErr } = await supabase
     .from("vocab_pairs")
     .select("id, ja, fr, topic_id")
     .in("topic_id", topicIds)
     .order("id", { ascending: true })
-    .limit(limitTopics * limitPairsPerTopic); // サーバ側上限に注意
+    .limit(limitTopics * limitPairsPerTopic);
   if (pairsErr || !pairsData?.length) return [];
 
-  // 3) 正誤を取得
+  // サーバの正誤を合算で取得（方向非依存スコアリング用）
   const allIds = pairsData.map((p) => p.id);
-  let countsMap: Map<number, Stat> = new Map();
-  try {
-    countsMap = await getCountsForItemsSrv(MENU_ID_KEBAB, allIds);
-  } catch (e) {
-    console.warn("[getCountsForItemsSrv] failed for weak view:", e);
-    // 失敗時はゼロ扱い
-    countsMap = new Map(allIds.map((id) => [id, { correct: 0, wrong: 0 }]));
-  }
+  const countsMap = await fetchCountsMerged(allIds);
 
-  // 4) スコアリング：未出題→正解0→正答率低い（昇順）→試行回数少→間違い多
-  type Scored = Pair & { _score: [number, number, number, number] }; // tuple sort
+  // 未出題→正解0→正答率低→試行少 の順で優先
+  type Scored = Pair & { _score: [number, number, number, number] };
   const scored: Scored[] = pairsData.map((p) => {
     const s = countsMap.get(p.id) ?? { correct: 0, wrong: 0 };
     const attempts = s.correct + s.wrong;
-    const unseen = attempts === 0 ? 0 : 1; // 未出題優先（0が先）
-    const zeroCorrect = s.correct === 0 ? 0 : 1; // 正解0優先
-    const acc = attempts ? s.correct / attempts : 0; // 正答率（低いほうが先）
-    const tieAttempts = attempts; // 少ないほうが先
-    // tuple: [未出題, 正解0, 正答率, 試行回数] で昇順
+    const unseen = attempts === 0 ? 0 : 1;
+    const zeroCorrect = s.correct === 0 ? 0 : 1;
+    const acc = attempts ? s.correct / attempts : 0;
+    const tieAttempts = attempts;
     return {
       id: p.id,
       ja: p.ja,
@@ -87,41 +250,15 @@ async function loadWeakPairsFromSupabase(
   return scored.slice(0, pickTop).map(({ id, ja, fr }) => ({ id, ja, fr }));
 }
 
-type Topic = {
-  id: number;
-  big_category: string; // 大項目（フォルダ or DBのカテゴリー）
-  subtopic: string; // 小項目（ファイル1行目の「…」or DBのサブトピック）
-  created_at: string;
-};
-
-type Pair = {
-  id: number;
-  ja: string;
-  fr: string;
-};
-
-type DrillDir = "JA2FR" | "FR2JA";
-type Stat = { correct: number; wrong: number };
-
 export default function NewsVocab() {
   // ---- 認証状態（uid） ----
   const [uid, setUid] = useState<string | null>(null);
   useEffect(() => {
     supabase.auth.getSession().then((res) => {
       setUid(res.data.session?.user?.id ?? null);
-      console.log(
-        "[auth] initial session user:",
-        res.data.session?.user?.id ?? null
-      );
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setUid(session?.user?.id ?? null);
-      console.log(
-        "[auth] onAuthStateChange:",
-        _e,
-        "user:",
-        session?.user?.id ?? null
-      );
     });
     return () => {
       sub.subscription.unsubscribe();
@@ -130,8 +267,8 @@ export default function NewsVocab() {
 
   // ---- UI/データ状態 ----
   const [topics, setTopics] = useState<Topic[]>([]);
-  const [selectedBigCat, setSelectedBigCat] = useState<string | null>(null); // ★ 大項目
-  const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null); // ★ 小項目（Topic.id）
+  const [selectedBigCat, setSelectedBigCat] = useState<string | null>(null);
+  const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null);
   const [pairs, setPairs] = useState<Pair[]>([]);
   const [loadingTopics, setLoadingTopics] = useState(true);
   const [loadingPairs, setLoadingPairs] = useState(false);
@@ -142,21 +279,17 @@ export default function NewsVocab() {
   const [idx, setIdx] = useState(0);
   const [revealed, setRevealed] = useState(false);
 
-  // セッション内の正誤カウント（表示用）
-  const [stats, setStats] = useState<
-    Record<number, { JA2FR: Stat; FR2JA: Stat }>
-  >({});
+  // セッション内の正誤（画面内のみのインメモリ）
+  const [stats, setStats] = useState<Record<number, DirStat>>({});
 
   // ---- セッション計測 ----
   const recentRef = useRef<number[]>([]);
   const pushRecent = (id: number | null) => {
     if (id == null) return;
     const arr = recentRef.current;
-    // 連続で同じIDを複数回入れない（重複は末尾に寄せたい場合は一度除去）
-    const idx = arr.indexOf(id);
-    if (idx !== -1) arr.splice(idx, 1);
+    const i = arr.indexOf(id);
+    if (i !== -1) arr.splice(i, 1);
     arr.push(id);
-    // 最大長を維持
     while (arr.length > COOLDOWN_N) arr.shift();
   };
   const clearRecent = () => {
@@ -165,11 +298,12 @@ export default function NewsVocab() {
   const sessionStartRef = useRef<number | null>(null);
   useEffect(() => {
     (async () => {
-      const t0 = await startSession(); // 終了時に保存
+      const t0 = await startSession();
       sessionStartRef.current = t0;
     })();
     return () => {
-      void endSession("news_vocab", sessionStartRef.current);
+      // 書き込みは snake に統一
+      void endSession(MENU_ID_SNAKE, sessionStartRef.current);
     };
   }, []);
 
@@ -185,24 +319,18 @@ export default function NewsVocab() {
         created_at: "",
       } as const;
 
-      // ① ローカル
-      const locals = listLocalTopics(); // /src/data/news-sets/** をトピック化（大項目=フォルダ、小項目=1行目）
+      const locals = listLocalTopics();
 
-      // ② Supabase
       const { data, error } = await supabase
         .from("topics")
         .select("id, big_category, subtopic, created_at")
         .order("id", { ascending: false });
 
       const remotes = error || !data ? [] : data;
-
-      // 表示順は [特集, ローカル, リモート] とする（必要なら並び替え可）
       const merged = [special as Topic, ...locals, ...remotes];
+
       setTopics(merged);
-
-      // 初期の大項目を決める（先頭の大項目）
       setSelectedBigCat((prev) => prev ?? merged[0]?.big_category ?? null);
-
       setLoadingTopics(false);
     })();
   }, []);
@@ -214,7 +342,6 @@ export default function NewsVocab() {
       if (!map.has(t.big_category)) map.set(t.big_category, []);
       map.get(t.big_category)!.push(t);
     }
-    // 小項目は日本語の辞書順で
     for (const [k, arr] of map) {
       arr.sort((a, b) => a.subtopic.localeCompare(b.subtopic, "ja"));
       map.set(k, arr);
@@ -240,19 +367,73 @@ export default function NewsVocab() {
     if (!selectedTopicId) return;
     (async () => {
       setLoadingPairs(true);
+
+      // 特集（弱点）
       if (selectedTopicId === WEAK_TOPIC_ID) {
         try {
           const data = await loadWeakPairsFromSupabase(
-            /* limitTopics */ 50,
-            /* perTopic */ 200,
-            /* pickTop */ LIMIT_PAIRS
+            50, // topics
+            200, // per topic
+            LIMIT_PAIRS // pickTop
           );
-          const limited = data.slice(0, LIMIT_PAIRS); // 念のためダブルセーフ
+          const limited = data.slice(0, LIMIT_PAIRS);
           setPairs(limited);
           clearRecent();
 
-          // stats 初期化
-          const next: Record<number, { JA2FR: Stat; FR2JA: Stat }> = {};
+          // サーバの counts を復元（kebab+snake の方向別合算）
+          if (!uid) {
+            // 認証がまだなら 0 初期化だけして終了（uid が入ると useEffect が再実行されます）
+            const next: Record<number, DirStat> = {};
+            for (const p of limited) {
+              next[p.id] = {
+                JA2FR: { correct: 0, wrong: 0 },
+                FR2JA: { correct: 0, wrong: 0 },
+              };
+            }
+            setStats(next);
+          } else
+            try {
+              const serverDirMap = await fetchCountsByDirMerged(
+                limited.map((v) => v.id),
+                uid
+              );
+              const next: Record<number, DirStat> = {};
+              for (const p of limited) {
+                next[p.id] = serverDirMap.get(p.id) ?? {
+                  JA2FR: { correct: 0, wrong: 0 },
+                  FR2JA: { correct: 0, wrong: 0 },
+                };
+              }
+              setStats(next);
+            } catch {
+              const next: Record<number, DirStat> = {};
+              for (const p of limited) {
+                next[p.id] = {
+                  JA2FR: { correct: 0, wrong: 0 },
+                  FR2JA: { correct: 0, wrong: 0 },
+                };
+              }
+              setStats(next);
+            }
+
+          setIdx(0);
+          setRevealed(false);
+        } finally {
+          setLoadingPairs(false);
+        }
+        return;
+      }
+
+      // ローカルトピック
+      if (isLocalTopicId(selectedTopicId)) {
+        const data = await loadLocalPairs(selectedTopicId);
+        const limited = data.slice(0, LIMIT_PAIRS);
+        setPairs(limited);
+        clearRecent();
+
+        // サーバから counts を復元（kebab+snake の方向別合算）
+        if (!uid) {
+          const next: Record<number, DirStat> = {};
           for (const p of limited) {
             next[p.id] = {
               JA2FR: { correct: 0, wrong: 0 },
@@ -260,32 +441,34 @@ export default function NewsVocab() {
             };
           }
           setStats(next);
-          setIdx(0);
-          setRevealed(false);
-        } finally {
-          setLoadingPairs(false);
-        }
-        return; // ← ここで早期リターン（以降のローカル/通常処理へ行かない）
-      }
-      // ローカルトピック
-      if (isLocalTopicId(selectedTopicId)) {
-        const data = await loadLocalPairs(selectedTopicId);
-        const limited = data.slice(0, LIMIT_PAIRS); // ★ 20件に制限
-        setPairs(limited);
-        clearRecent();
-        const next: Record<number, { JA2FR: Stat; FR2JA: Stat }> = {};
-        for (const p of limited) {
-          // ★ limited を使う
-          next[p.id] = {
-            JA2FR: { correct: 0, wrong: 0 },
-            FR2JA: { correct: 0, wrong: 0 },
-          };
-        }
-        setStats(next);
+        } else
+          try {
+            const ids = limited.map((p) => p.id);
+            const serverDirMap = await fetchCountsByDirMerged(ids, uid);
+            const next: Record<number, DirStat> = {};
+            for (const p of limited) {
+              next[p.id] = serverDirMap.get(p.id) ?? {
+                JA2FR: { correct: 0, wrong: 0 },
+                FR2JA: { correct: 0, wrong: 0 },
+              };
+            }
+            setStats(next);
+          } catch (e) {
+            console.warn("[getCountsForItems local] failed:", e);
+            const next: Record<number, DirStat> = {};
+            for (const p of limited) {
+              next[p.id] = {
+                JA2FR: { correct: 0, wrong: 0 },
+                FR2JA: { correct: 0, wrong: 0 },
+              };
+            }
+            setStats(next);
+          }
 
+        // 進捗復元（UIモジュール ID は kebab）
         if (uid) {
           try {
-            const prog = await loadProgressSrv(MENU_ID_KEBAB, {
+            const prog = await loadProgressSrv(UI_MODULE_ID, {
               topic_id: selectedTopicId,
               dir,
             });
@@ -318,15 +501,13 @@ export default function NewsVocab() {
         setLoadingPairs(false);
         return;
       }
-      setPairs(data);
-
-      const limited = (data ?? []).slice(0, LIMIT_PAIRS); // ★ 20件に制限
+      const limited = (data ?? []).slice(0, LIMIT_PAIRS);
       setPairs(limited);
       clearRecent();
+
       const zeroInit = () => {
-        const next: Record<number, { JA2FR: Stat; FR2JA: Stat }> = {};
+        const next: Record<number, DirStat> = {};
         for (const p of limited) {
-          // ★ limited を使う
           next[p.id] = {
             JA2FR: { correct: 0, wrong: 0 },
             FR2JA: { correct: 0, wrong: 0 },
@@ -335,37 +516,36 @@ export default function NewsVocab() {
         setStats(next);
       };
 
+      // サーバの counts 復元を試みる（kebab+snake の方向別合算）
       if (!uid) {
         zeroInit();
-      } else {
+      } else
         try {
           const itemIds = limited.map((p) => p.id);
-          const serverMap = await fetchCountsMerged(itemIds);
-
-          const next: Record<number, { JA2FR: Stat; FR2JA: Stat }> = {};
+          const serverDirMap = await fetchCountsByDirMerged(itemIds, uid);
+          const next: Record<number, DirStat> = {};
           for (const p of limited) {
-            const s = serverMap.get(p.id) ?? { correct: 0, wrong: 0 };
-            next[p.id] = { JA2FR: s, FR2JA: s };
+            next[p.id] = serverDirMap.get(p.id) ?? {
+              JA2FR: { correct: 0, wrong: 0 },
+              FR2JA: { correct: 0, wrong: 0 },
+            };
           }
           setStats(next);
         } catch (e) {
           console.warn("[getCountsForItems] failed:", e);
           zeroInit();
         }
-      }
 
+      // 進捗復元（UIモジュール ID は kebab）
       if (uid) {
         try {
-          const prog = await loadProgressSrv(MENU_ID_KEBAB, {
+          const prog = await loadProgressSrv(UI_MODULE_ID, {
             topic_id: selectedTopicId,
             dir,
           });
-          if (prog?.last_item_id) {
-            const i = data.findIndex((x) => x.id === prog.last_item_id);
-            if (i >= 0) setIdx(i);
-          } else {
-            setIdx(0);
-          }
+          const i = data?.findIndex((x) => x.id === prog?.last_item_id) ?? -1;
+          if (i >= 0) setIdx(i);
+          else setIdx(0);
           setRevealed(false);
         } catch (e) {
           console.warn("[loadProgress] failed:", e);
@@ -418,7 +598,7 @@ export default function NewsVocab() {
         return a - b;
       });
     } else {
-      // フェーズ2: 正答率の低い順（上げていく）
+      // フェーズ2: 正答率の低い順
       return indices.sort((a, b) => {
         const sa = statFor(pairs[a].id);
         const sb = statFor(pairs[b].id);
@@ -437,10 +617,7 @@ export default function NewsVocab() {
   const goNextPrioritized = () => {
     if (pairs.length === 0) return;
 
-    // まずは既存の優先度順を作る
     const order = sortedIndices();
-
-    // 直近履歴に含まれず、かつ現在と異なる index を候補化
     const recentIds = new Set(recentRef.current);
     const baseCandidates = order.filter((i) => {
       const id = pairs[i]?.id;
@@ -452,10 +629,10 @@ export default function NewsVocab() {
     if (baseCandidates.length > 0) {
       nextIdx = baseCandidates[0];
     } else {
-      // すべてクールダウンに引っかかった場合は、古い順に履歴を緩めて候補を探す
-      const relax = [...recentRef.current]; // 古い→新しい
+      // すべてクールダウンに引っかかった → 古い順から緩和
+      const relax = [...recentRef.current];
       while (relax.length > 0 && nextIdx == null) {
-        relax.shift(); // 1つ緩める
+        relax.shift();
         const relaxedSet = new Set(relax);
         const cands = order.filter((i) => {
           const id = pairs[i]?.id;
@@ -463,13 +640,9 @@ export default function NewsVocab() {
         });
         if (cands.length > 0) nextIdx = cands[0];
       }
-      // それでも見つからない（= ペア数が極端に少ない等）場合の最終フォールバック
-      if (nextIdx == null) {
-        nextIdx = order.find((i) => i !== idx) ?? idx;
-      }
+      if (nextIdx == null) nextIdx = order.find((i) => i !== idx) ?? idx;
     }
 
-    // 現在カードを履歴に積んでから遷移
     const currentId = pairs[idx]?.id ?? null;
     pushRecent(currentId);
 
@@ -492,7 +665,7 @@ export default function NewsVocab() {
     }
   };
 
-  // 正解/不正の記録（Supabaseへ・セッション内統計も更新）→ 次カード
+  // 正解/不正の記録（書き込みは snake）
   const mark = async (kind: "correct" | "wrong") => {
     if (!card) return;
 
@@ -511,7 +684,7 @@ export default function NewsVocab() {
 
     try {
       await recordAttemptSrv({
-        menuId: MENU_ID,
+        menuId: MENU_ID_SNAKE, // "news_vocab"
         isCorrect: kind === "correct",
         itemId: card.id,
         skillTags: [],
@@ -530,42 +703,76 @@ export default function NewsVocab() {
     }
     goNextPrioritized();
   };
-  // counts の取得: snake/kebab の両方を読んでマージ（dir も渡せるなら渡す）
-  async function fetchCountsMerged(itemIds: number[]) {
-    const map = await getCountsForItemsSrv(MENU_ID_KEBAB, itemIds).catch(
-      () => new Map<number, Stat>()
-    );
-    return map;
-  }
+  const hotkeysEnabled =
+    selectedTopicId !== null &&
+    mode === "drill" &&
+    !loadingPairs &&
+    pairs.length > 0;
 
-  // 進捗保存（ログイン時）
+  // ホットキー登録
+  useDrillHotkeys({
+    enabled: hotkeysEnabled,
+    revealed,
+    setRevealed,
+    onCorrect: () => void mark("correct"),
+    onWrong: () => void mark("wrong"),
+    onNext,
+    onPrev,
+  });
+  // 進捗保存（UI モジュールは kebab）
   useEffect(() => {
     if (!card || !selectedTopicId || !uid) return;
     void saveProgressSrv({
-      moduleId: MENU_ID_KEBAB,
+      moduleId: UI_MODULE_ID, // "news-vocab"
       context: { topic_id: selectedTopicId, dir },
       lastItemId: card.id,
     });
   }, [card, dir, selectedTopicId, uid]);
 
-  // セッション内合計（ヘッダー表示）
-  const totalCorrect = useMemo(
-    () =>
-      Object.values(stats).reduce(
-        (a, s) => a + s.JA2FR.correct + s.FR2JA.correct,
-        0
-      ),
-    [stats]
-  );
-  const totalTried = useMemo(
-    () =>
-      Object.values(stats).reduce(
-        (a, s) =>
-          a + s.JA2FR.correct + s.JA2FR.wrong + s.FR2JA.correct + s.FR2JA.wrong,
-        0
-      ),
-    [stats]
-  );
+  // ===== ヘッダー表示用：サーバ上の累計 正解/試行（kebab + snake 合算） =====
+  const [sessionTotal, setSessionTotal] = useState<{
+    correct: number;
+    tried: number;
+  }>({
+    correct: 0,
+    tried: 0,
+  });
+  useEffect(() => {
+    if (!uid) {
+      setSessionTotal({ correct: 0, tried: 0 });
+      return;
+    }
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("attempts")
+          .select("is_correct, menu_id")
+          .eq("user_id", uid)
+          .in("menu_id", [UI_MODULE_ID, MENU_ID_SNAKE]); // 両方
+        if (error) throw error;
+        const correct = data?.filter((a) => a.is_correct).length ?? 0;
+        const tried = data?.length ?? 0;
+        setSessionTotal({ correct, tried });
+      } catch (e) {
+        console.warn("[load session total] failed:", e);
+      }
+    })();
+  }, [uid]);
+
+  // 今セッションで増えた分（画面での操作ぶん）
+  const sessionIncrement = useMemo(() => {
+    let correct = 0;
+    let tried = 0;
+    for (const s of Object.values(stats)) {
+      correct += s.JA2FR.correct + s.FR2JA.correct;
+      tried +=
+        s.JA2FR.correct + s.JA2FR.wrong + s.FR2JA.correct + s.FR2JA.wrong;
+    }
+    return { correct, tried };
+  }, [stats]);
+
+  const totalCorrect = sessionTotal.correct + sessionIncrement.correct;
+  const totalTried = sessionTotal.tried + sessionIncrement.tried;
   const acc = totalTried ? Math.round((totalCorrect / totalTried) * 100) : 0;
 
   return (
@@ -763,7 +970,7 @@ function ListView({
 }: {
   pairs: Pair[];
   loading: boolean;
-  stats: Record<number, { JA2FR: Stat; FR2JA: Stat }>;
+  stats: Record<number, DirStat>;
 }) {
   if (loading)
     return <div className="mt-6 text-slate-500">語彙を読み込み中…</div>;

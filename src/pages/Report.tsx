@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { getDailyStudySeconds } from "../lib/supaMetrics";
 import { isLocalTopicId, loadLocalPairs } from "../lib/localNewsSets";
+import { listLocalTopics } from "../lib/localNewsSets";
 
 /* ========== 型 ========== */
 
@@ -24,20 +25,6 @@ type StudyBucket = {
   sec: number;
 };
 
-// 学習イベント（最低限）
-type DrillDir = "JA2FR" | "FR2JA";
-type EventMeta = {
-  dir?: DrillDir;
-  source?: "local" | "remote";
-  topic_id?: number;
-};
-type RawLE = {
-  item_id: number | null;
-  is_correct: boolean;
-  created_at?: string;
-  meta?: EventMeta | Record<string, unknown> | null;
-};
-
 /* ========== ②の根本修正：単語統計の取得 ========== */
 
 async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
@@ -46,42 +33,40 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
     Date.now() - SINCE_DAYS * 86400 * 1000
   ).toISOString();
 
-  // 1) ビューがあれば使う
-  try {
-    const { data: vs, error } = await supabase
-      .from("v_user_vocab_stats_14d")
-      .select("*")
-      .eq("user_id", uid);
+  // --- 1) attempts から読む（created_at が無い環境にも対応） ---
+  type AttemptRow = { item_id: number | null; is_correct: boolean };
+  let rowsAttempt: AttemptRow[] = [];
 
-    if (!error && vs && vs.length > 0) {
-      return vs as VocabStat[];
-    }
-  } catch {
-    // フォールバックへ
-  }
-
-  // 2) learning_events を直接読む（menu 揺れ対応）
-  const { data: evsRaw, error: evErr } = await supabase
-    .from("learning_events")
-    .select("item_id,is_correct,created_at,meta,menu")
+  // まずは created_at 付きで試す
+  const tryWithCreated = await supabase
+    .from("attempts")
+    .select("item_id,is_correct,created_at,menu_id")
     .eq("user_id", uid)
-    .in("menu", ["news_vocab", "news-vocab"])
+    .in("menu_id", ["news_vocab", "news-vocab"])
     .not("item_id", "is", null)
     .gte("created_at", sinceISO);
 
-  if (evErr || !evsRaw || evsRaw.length === 0) return [];
+  if (!tryWithCreated.error && tryWithCreated.data) {
+    rowsAttempt = tryWithCreated.data as AttemptRow[];
+  } else {
+    // created_at が無い or 列名違い → 期間フィルタ無しで再取得
+    const fallback = await supabase
+      .from("attempts")
+      .select("item_id,is_correct,menu_id")
+      .eq("user_id", uid)
+      .in("menu_id", ["news_vocab", "news-vocab"])
+      .not("item_id", "is", null);
+    rowsAttempt = (fallback.data as AttemptRow[]) ?? [];
+  }
 
-  const rows: RawLE[] = evsRaw as RawLE[];
+  const rows = rowsAttempt; // ← legacyを合算しない場合はこちら
 
-  // 3) 集計（item_id ごと）
+  if (!rows || rows.length === 0) return [];
+
+  // --- 2) item_id ごとに集計 ---
   const aggMap = new Map<
     number,
-    {
-      attempts: number;
-      corrects: number;
-      wrongs: number;
-      metaSamples: EventMeta[];
-    }
+    { attempts: number; corrects: number; wrongs: number }
   >();
   for (const r of rows) {
     if (r.item_id == null) continue;
@@ -89,73 +74,40 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
       attempts: 0,
       corrects: 0,
       wrongs: 0,
-      metaSamples: [],
     };
     cur.attempts += 1;
     if (r.is_correct) cur.corrects += 1;
     else cur.wrongs += 1;
-
-    // メタの整形（unknown も EventMeta に寄せる）
-    const meta = normalizeMeta(r.meta);
-    if (meta) cur.metaSamples.push(meta);
-
     aggMap.set(r.item_id, cur);
   }
   const itemIds = [...aggMap.keys()];
   if (itemIds.length === 0) return [];
 
-  // 4) ラベル逆引き：remote（vocab_pairs）を一括で
+  // --- 3) ラベル解決（まずは remote: vocab_pairs） ---
   const labelMap = new Map<number, string>();
-  const { data: vp, error: vpErr } = await supabase
-    .from("vocab_pairs")
-    .select("id, ja, fr")
-    .in("id", itemIds);
+  const unresolved = new Set(itemIds);
 
-  if (!vpErr && vp) {
-    for (const row of vp as Array<{ id: number; ja: string; fr: string }>) {
-      if (Number.isFinite(row.id) && !labelMap.has(row.id)) {
-        labelMap.set(row.id, `${row.ja} — ${row.fr}`);
+  // すべてのローカルトピックを走査
+  const locals = listLocalTopics();
+  for (const t of locals) {
+    if (!isLocalTopicId(t.id)) continue;
+    const pairs = await loadLocalPairs(t.id);
+    for (const p of pairs) {
+      if (unresolved.has(p.id)) {
+        labelMap.set(p.id, `${p.ja} — ${p.fr}`);
+        unresolved.delete(p.id);
       }
     }
+    if (unresolved.size === 0) break;
   }
 
-  // 5) remote で解決できなかった item を local で解決
-  const unresolved = itemIds.filter((id) => !labelMap.has(id));
-  if (unresolved.length > 0) {
-    // item_id → topic_id の推定（metaSamples の先勝ち）
-    const topicByItem = new Map<number, number>();
-    for (const id of unresolved) {
-      const m = aggMap.get(id)?.metaSamples ?? [];
-      const topic = m.find(
-        (x) => x.source === "local" && typeof x.topic_id === "number"
-      )?.topic_id;
-      if (typeof topic === "number" && isLocalTopicId(topic)) {
-        topicByItem.set(id, topic);
-      }
-    }
-
-    // topic_id ごとにローカルファイルを読んで逆引き
-    const uniqueTopics = [...new Set(topicByItem.values())];
-    for (const topicId of uniqueTopics) {
-      const pairs = await loadLocalPairs(topicId);
-      for (const [itemId, tId] of topicByItem.entries()) {
-        if (tId !== topicId) continue;
-        const p = pairs.find((x) => x.id === itemId);
-        if (p && !labelMap.has(itemId)) {
-          labelMap.set(itemId, `${p.ja} — ${p.fr}`);
-        }
-      }
-    }
-  }
-
-  // 6) VocabStat に整形（label が無いものは null）
+  // --- 5) VocabStat に整形して、正答率の低い順に返す ---
   const stats: VocabStat[] = itemIds.map((id) => {
     const a = aggMap.get(id)!;
     const acc = a.attempts ? Math.round((a.corrects / a.attempts) * 100) : 0;
-    const label = labelMap.get(id) ?? null;
     return {
       user_id: uid,
-      word: label,
+      word: labelMap.get(id) ?? null,
       lemma: null,
       attempts: a.attempts,
       corrects: a.corrects,
@@ -164,25 +116,157 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
     };
   });
 
-  // 正答率の低い順に返す（下流で slice する）
   return stats.sort((x, y) => x.accuracy_percent - y.accuracy_percent);
 }
 
-/* ========== メタ正規化（unknown → EventMeta） ========== */
-function normalizeMeta(meta: RawLE["meta"]): EventMeta | null {
-  if (!meta || typeof meta !== "object") return null;
-  const src = (meta as Record<string, unknown>)["source"];
-  const dir = (meta as Record<string, unknown>)["dir"];
-  const topic = (meta as Record<string, unknown>)["topic_id"];
+// types
+type Agg = { attempts: number; corrects: number; wrongs: number };
 
-  const out: EventMeta = {};
-  if (src === "local" || src === "remote") out.source = src;
-  if (dir === "JA2FR" || dir === "FR2JA") out.dir = dir;
-  if (typeof topic === "number") out.topic_id = topic;
-  return Object.keys(out).length ? out : null;
+// attempts から任意の menu_id 群を集計（snake/kebab 両方渡してもOK）
+async function fetchAggFromAttempts(
+  uid: string,
+  menuIds: string[]
+): Promise<Map<number, Agg>> {
+  type Row = { item_id: number | null; is_correct: boolean };
+  const { data, error } = await supabase
+    .from("attempts")
+    .select("item_id,is_correct,menu_id")
+    .eq("user_id", uid)
+    .in("menu_id", menuIds)
+    .not("item_id", "is", null);
+
+  if (error || !data) return new Map();
+
+  const agg = new Map<number, Agg>();
+  (data as Row[]).forEach((r) => {
+    if (r.item_id == null) return;
+    const cur = agg.get(r.item_id) ?? { attempts: 0, corrects: 0, wrongs: 0 };
+    cur.attempts += 1;
+    if (r.is_correct) cur.corrects += 1;
+    else cur.wrongs += 1;
+    agg.set(r.item_id, cur);
+  });
+  return agg;
 }
 
-/* ========== Report 本体（弱点トピックは削除済み） ========== */
+// 名詞化ジムのTSVローダー（Report.tsx用）
+async function loadNominalisationPart(n: number) {
+  try {
+    const url = new URL(
+      `../data/nominalisations/nominalisations_part${n}.tsv`,
+      import.meta.url
+    ).toString();
+
+    const text = await fetch(url).then((r) => {
+      if (!r.ok) throw new Error(`TSV load failed: part${n}`);
+      return r.text();
+    });
+
+    const lines = text.trim().split(/\r?\n/);
+    if (lines.length === 0) return [];
+
+    const firstLine = lines[0].replace(/^\uFEFF/, "");
+    const header = firstLine.split("\t").map((h) => h.trim());
+
+    const idxOf = (names: string[]) =>
+      header.findIndex((h) =>
+        names.some((nm) => h.toLowerCase() === nm.toLowerCase())
+      );
+
+    const iId = idxOf(["id", "item_id"]);
+    const iBase = idxOf(["source", "元の単語（品詞）", "base", "原語"]);
+    const iNom = idxOf(["nominal", "名詞化形", "名詞化", "noun"]);
+    const iJa = idxOf(["ja", "日本語訳", "jp"]);
+
+    const hasHeader = iBase !== -1 && iNom !== -1;
+    const body = hasHeader ? lines.slice(1) : lines;
+
+    const pairs: Array<{
+      id: number;
+      base: string;
+      nominal: string;
+      ja?: string;
+    }> = [];
+
+    body.forEach((row, lineIdx) => {
+      const cols = row.split("\t");
+
+      let base: string | undefined;
+      let nominal: string | undefined;
+      let ja: string | undefined;
+
+      if (hasHeader) {
+        base = cols[iBase]?.trim();
+        nominal = cols[iNom]?.trim();
+        ja = iJa !== -1 ? cols[iJa]?.trim() : undefined;
+      } else {
+        base = cols[0]?.trim();
+        nominal = cols[1]?.trim();
+        ja = cols[2]?.trim();
+      }
+
+      if (!base || !nominal) return;
+
+      // **...** を除去
+      base = base.replace(/\*\*/g, "").replace(/\*/g, "").trim();
+
+      // IDの生成（Nominalisation.tsxと同じロジック）
+      let id: number;
+      if (hasHeader) {
+        const rawId = iId !== -1 ? cols[iId]?.trim() : undefined;
+        const parsed = rawId ? Number(rawId) : NaN;
+        id = Number.isFinite(parsed) ? parsed : n * 1_000_000 + lineIdx;
+      } else {
+        id = n * 1_000_000 + lineIdx;
+      }
+
+      pairs.push({ id, base, nominal, ja });
+    });
+
+    return pairs;
+  } catch (e) {
+    console.warn(`[loadNominalisationPart] part${n} failed:`, e);
+    return [];
+  }
+}
+
+async function resolveNominalisationLabels(
+  ids: number[]
+): Promise<Map<number, string>> {
+  const m = new Map<number, string>();
+
+  // 全7パートを読み込み
+  const allPairs: Array<{
+    id: number;
+    base: string;
+    nominal: string;
+    ja?: string;
+  }> = [];
+
+  for (let partNum = 1; partNum <= 7; partNum++) {
+    const pairs = await loadNominalisationPart(partNum);
+    allPairs.push(...pairs);
+  }
+
+  // IDをキーにラベルを設定
+  for (const p of allPairs) {
+    if (ids.includes(p.id)) {
+      // 「元の単語 → 名詞化」の形式で表示
+      m.set(p.id, `${p.base} → ${p.nominal}`);
+    }
+  }
+
+  // 見つからなかったIDは#番号で表示
+  for (const id of ids) {
+    if (!m.has(id)) {
+      m.set(id, `#${id}`);
+    }
+  }
+
+  return m;
+}
+
+/* ========== Report 本体 ========== */
 
 export default function Report() {
   const [loading, setLoading] = useState(true);
@@ -192,6 +276,8 @@ export default function Report() {
   // ③
   const [studyBuckets, setStudyBuckets] = useState<StudyBucket[]>([]);
 
+  const [nominoStats, setNominoStats] = useState<VocabStat[]>([]);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -200,15 +286,41 @@ export default function Report() {
         const uid = auth.user?.id;
         if (!uid) {
           setVocabStats([]);
+          setNominoStats([]);
           setStudyBuckets([]);
           return;
         }
 
-        // ①② 単語（直近14日）— 修正版フェッチ
+        // ① 時事単語
         const vs = await fetchNewsVocabStats(uid);
         setVocabStats(vs);
 
-        // ③ 勉強時間（直近14日ぶんを helper から秒で取得）
+        // ② 名詞化ジム
+        {
+          const agg = await fetchAggFromAttempts(uid, ["nominalisation"]);
+          const ids = [...agg.keys()];
+          const labels = await resolveNominalisationLabels(ids);
+          const rows: VocabStat[] = ids
+            .map((id) => {
+              const a = agg.get(id)!;
+              const acc = a.attempts
+                ? Math.round((a.corrects / a.attempts) * 100)
+                : 0;
+              return {
+                user_id: uid,
+                word: labels.get(id) ?? `#${id}`,
+                lemma: null,
+                attempts: a.attempts,
+                corrects: a.corrects,
+                wrongs: a.wrongs,
+                accuracy_percent: acc,
+              };
+            })
+            .sort((x, y) => x.accuracy_percent - y.accuracy_percent);
+          setNominoStats(rows);
+        }
+
+        // ③ 勉強時間
         const buckets = await getDailyStudySeconds(14);
         setStudyBuckets(buckets ?? []);
       } finally {
@@ -341,7 +453,110 @@ export default function Report() {
             </div>
           )}
         </section>
+        {/* ② 名詞化ジム */}
+        <section id="nominalisation" className="glass-card p-4 scroll-mt-24">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold">② 名詞化ジム</h2>
+          </div>
 
+          {loading ? (
+            <p className="text-slate-600 text-sm mt-2">読み込み中…</p>
+          ) : nominoStats.length === 0 ? (
+            <p className="text-slate-600 text-sm mt-2">
+              データがありません。まずは学習を始めましょう。
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-col gap-4">
+              {/* 概要 */}
+              <div className="rounded-xl border p-3 bg-white">
+                <h3 className="text-sm font-semibold">単語の正答率のまとめ</h3>
+                <div className="mt-2 grid sm:grid-cols-2 gap-3">
+                  <StatItem
+                    label="今まで学習した問題"
+                    value={nominoStats.reduce(
+                      (s, x) => s + (x.attempts ?? 0),
+                      0
+                    )}
+                  />
+                  <StatItem
+                    label="正答（回）"
+                    value={nominoStats.reduce(
+                      (s, x) => s + (x.corrects ?? 0),
+                      0
+                    )}
+                  />
+                  <StatItem
+                    label="誤答（回）"
+                    value={nominoStats.reduce((s, x) => s + (x.wrongs ?? 0), 0)}
+                  />
+                  <StatItem
+                    label="正答率（全体）"
+                    value={`${(() => {
+                      const a = nominoStats.reduce(
+                        (s, x) => s + (x.attempts ?? 0),
+                        0
+                      );
+                      const c = nominoStats.reduce(
+                        (s, x) => s + (x.corrects ?? 0),
+                        0
+                      );
+                      return a ? Math.round((c / a) * 100) : 0;
+                    })()}%`}
+                  />
+                </div>
+              </div>
+
+              {/* 苦手 Best 10 */}
+              <div className="rounded-xl border p-3 bg-white">
+                <h3 className="text-sm font-semibold">
+                  苦手な問題 Best 10（attempts ≥ 2）
+                </h3>
+                {nominoStats.filter((x) => (x.attempts ?? 0) >= 2).length ===
+                0 ? (
+                  <p className="text-slate-600 text-sm mt-2">
+                    データがありません。
+                  </p>
+                ) : (
+                  <ul className="mt-3 space-y-2">
+                    {nominoStats
+                      .filter((x) => (x.attempts ?? 0) >= 2)
+                      .sort((a, b) =>
+                        a.accuracy_percent !== b.accuracy_percent
+                          ? a.accuracy_percent - b.accuracy_percent
+                          : (b.attempts ?? 0) - (a.attempts ?? 0)
+                      )
+                      .slice(0, 10)
+                      .map((w, i) => {
+                        const label =
+                          (w.word && w.word.trim()) ||
+                          (w.lemma && w.lemma.trim()) ||
+                          "（不明）";
+                        return (
+                          <li
+                            key={`${label}-${i}`}
+                            className="rounded-lg border p-2 bg-white"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-sm font-medium">
+                                {i + 1}. {label}
+                              </div>
+                              <div className="text-xs text-slate-600">
+                                正答率 {w.accuracy_percent}%（{w.corrects}/
+                                {w.attempts}）
+                              </div>
+                            </div>
+                            <ProgressBar
+                              percent={safePercent(w.accuracy_percent)}
+                            />
+                          </li>
+                        );
+                      })}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
         {/* ③ 勉強時間 */}
         <section className="glass-card p-4">
           <h2 className="font-semibold">③ 勉強時間（直近14日）</h2>

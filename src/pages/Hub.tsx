@@ -1,10 +1,42 @@
 // src/pages/Hub.tsx
 import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
-import { getModuleStats } from "../lib/metrics";
+import { getModuleAccuracy } from "../lib/supaMetrics";
+import { useEffect, useState } from "react";
 
 export default function Hub() {
   const { user, loading, logout } = useAuth();
+  const [mod, setMod] = useState<
+    Record<string, { total: number; correct: number }>
+  >({
+    "news-vocab": { total: 0, correct: 0 },
+    nominalisation: { total: 0, correct: 0 },
+    "verb-gym": { total: 0, correct: 0 },
+    freewrite: { total: 0, correct: 0 },
+    futsuken: { total: 0, correct: 0 },
+  });
+
+  useEffect(() => {
+    if (!user) return; // ← userがいなければ何もしない
+    (async () => {
+      const entries = [
+        ["news-vocab", "news_vocab"],
+        ["nominalisation", "nominalisation"],
+        ["verb-gym", "verb_gym"],
+        ["freewrite", "freewrite"],
+        ["futsuken", "futsuken"],
+      ] as const;
+      const results = await Promise.all(
+        entries.map(([, snake]) => getModuleAccuracy(snake))
+      );
+      const next: Record<string, { total: number; correct: number }> = {};
+      entries.forEach(([k], i) => {
+        next[k] = { total: results[i].total, correct: results[i].correct };
+      });
+      setMod(next);
+    })();
+  }, [user]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-svh">
@@ -16,10 +48,6 @@ export default function Hub() {
   if (!user) {
     return <Navigate to="/login" replace />;
   }
-
-  const uid = user.id;
-  const mod = getModuleStats(uid);
-  // const rep = getReport(uid);
 
   const StatBadge = ({
     label,
@@ -212,6 +240,7 @@ export default function Hub() {
             to="/app/news-vocab"
             stat={mod["news-vocab"]}
             hue="rose"
+            disabled={false}
           />
           <Card
             emoji="✍️"
@@ -220,16 +249,16 @@ export default function Hub() {
             to="/app/nominalisation"
             stat={mod["nominalisation"]}
             hue="violet"
-            disabled
+            disabled={false}
           />
           <Card
             emoji="🧩"
             title="③ 動詞選択＋活用"
             desc="適切な動詞・時制・一致を選ぶ"
-            to="/app/verb-gym"
+            to="/app/temps"
             stat={mod["verb-gym"]}
             hue="emerald"
-            disabled
+            disabled={false}
           />
           <Card
             emoji="📝"
@@ -249,50 +278,6 @@ export default function Hub() {
             hue="rose"
           />
         </div>
-
-        {/* 弱点ハイライト
-        <section className="mt-10">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">
-              弱点フォーカス（直近データ）
-            </h3>
-            <Link
-              to="/app/report"
-              className="text-sm text-rose-600 hover:text-rose-700 underline underline-offset-4"
-            >
-              レポートで詳しく見る →
-            </Link>
-          </div>
-
-          {rep.weak.length === 0 ? (
-            <p className="mt-3 text-slate-600 text-sm">
-              データが十分ではありません。まずはどれかのメニューを始めましょう。
-            </p>
-          ) : (
-            <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {rep.weak.map((w) => (
-                <li
-                  key={w.tag}
-                  className="rounded-2xl border bg-white/70 backdrop-blur p-4 shadow-sm hover:shadow transition"
-                >
-                  <div className="text-sm font-medium">{w.tag}</div>
-                  <div className="text-xs text-slate-600 mt-1">
-                    正答率 <span className="font-semibold">{w.acc}%</span>（
-                    {w.total} 問）
-                  </div>
-                  <div className="mt-3 h-2 w-full rounded-full bg-slate-200 overflow-hidden">
-                    <div
-                      className="h-full bg-rose-500"
-                      style={{
-                        width: `${Math.min(100, Math.max(0, w.acc))}%`,
-                      }}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section> */}
       </main>
     </div>
   );

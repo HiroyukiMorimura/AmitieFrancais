@@ -28,7 +28,7 @@ export default function Landing() {
       <section className="relative w-full min-h-[calc(100svh-64px)] overflow-hidden">
         {/* 背景写真（全画面） */}
         <img
-          src="/app_icon.jpg"
+          src="/images/app_icon.jpg"
           onError={(e) => {
             (e.currentTarget as HTMLImageElement).src =
               "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?q=80&w=1600&auto=format&fit=crop";
@@ -67,8 +67,9 @@ export default function Landing() {
             >
               <li className="chip">📰 時事単語</li>
               <li className="chip">✍️ 名詞化ドリル</li>
+              <li className="chip">🔤 動詞ドリル</li>
+              <li className="chip">📝 仏作文</li>
               <li className="chip">📈 学習記録</li>
-              <li className="chip">🧑‍🏫 先生メモ</li>
             </ul>
           </div>
           {/* 装飾カード（中央寄せ） */}
@@ -76,7 +77,7 @@ export default function Landing() {
             <div className="relative aspect-[4/3] overflow-hidden rounded-[28px] shadow-2xl border border-white/70 bg-white/70 backdrop-blur">
               {/* 写真本体：4:3の枠に収めて比率維持で拡大縮小 */}
               <img
-                src="/tomoko.jpg"
+                src="/images/tomoko.jpg"
                 onError={(e) => {
                   const img = e.currentTarget as HTMLImageElement;
                   // フォールバック（なければ Unsplash）

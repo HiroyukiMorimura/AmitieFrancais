@@ -1,8 +1,8 @@
 export type UIModuleId =
   | "news-vocab"
   | "nominalisation"
-  | "verb-gym"
-  | "freewrite"
+  | "verbe"
+  | "composition"
   | "futsuken";
 
 export type Attempt = {
@@ -20,8 +20,8 @@ export type Attempt = {
 export const MODULE_IDS: UIModuleId[] = [
   "news-vocab",
   "nominalisation",
-  "verb-gym",
-  "freewrite",
+  "verbe",
+  "composition",
   "futsuken",
 ];
 

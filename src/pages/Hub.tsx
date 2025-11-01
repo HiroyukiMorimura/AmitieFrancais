@@ -1,39 +1,80 @@
 // src/pages/Hub.tsx
 import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
-import { getModuleAccuracy } from "../lib/supaMetrics";
+import { getModuleAccuracy, getDailyStudySeconds } from "../lib/supaMetrics";
 import { useEffect, useState } from "react";
+
+type Stat = { total: number; correct: number };
+type StudyBucket = { day: string; sec: number };
+
+// ===== ヘルパー（全期間の欠損日を0埋め & 連続日数計算） =====
+function toDate(d: string) {
+  return new Date(d + "T00:00:00");
+}
+function toDayStr(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+function padDailyBuckets(all: StudyBucket[]) {
+  if (!all || all.length === 0) return [];
+  const sorted = all.slice().sort((a, b) => a.day.localeCompare(b.day));
+  const start = toDate(sorted[0].day);
+  const today = new Date();
+  const end = toDate(toDayStr(today));
+  const map = new Map(sorted.map((x) => [x.day, x.sec ?? 0]));
+  const out: StudyBucket[] = [];
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const key = toDayStr(d);
+    out.push({ day: key, sec: map.get(key) ?? 0 });
+  }
+  return out;
+}
+function computeStreak(all: StudyBucket[]) {
+  const padded = padDailyBuckets(all);
+  let streak = 0;
+  for (let i = padded.length - 1; i >= 0; i--) {
+    if ((padded[i].sec ?? 0) > 0) streak++;
+    else break;
+  }
+  return streak;
+}
 
 export default function Hub() {
   const { user, loading, logout } = useAuth();
-  const [mod, setMod] = useState<
-    Record<string, { total: number; correct: number }>
-  >({
+
+  const [mod, setMod] = useState<Record<string, Stat>>({
     "news-vocab": { total: 0, correct: 0 },
     nominalisation: { total: 0, correct: 0 },
     "verb-gym": { total: 0, correct: 0 },
-    freewrite: { total: 0, correct: 0 },
+    composition: { total: 0, correct: 0 },
     futsuken: { total: 0, correct: 0 },
   });
 
+  const [studyBuckets, setStudyBuckets] = useState<StudyBucket[]>([]);
+
   useEffect(() => {
-    if (!user) return; // ← userがいなければ何もしない
+    if (!user) return;
     (async () => {
+      // モジュール正答集計（キーを"verb-gym"に統一）
       const entries = [
         ["news-vocab", "news_vocab"],
         ["nominalisation", "nominalisation"],
-        ["verb-gym", "verb_gym"],
-        ["freewrite", "freewrite"],
+        ["verb-gym", "verbe"],
+        ["composition", "composition"],
         ["futsuken", "futsuken"],
       ] as const;
+
       const results = await Promise.all(
         entries.map(([, snake]) => getModuleAccuracy(snake))
       );
-      const next: Record<string, { total: number; correct: number }> = {};
+      const next: Record<string, Stat> = {};
       entries.forEach(([k], i) => {
         next[k] = { total: results[i].total, correct: results[i].correct };
       });
       setMod(next);
+
+      // 学習時間（全期間）。引数なし対応がなければ十分に大きい日数で代替
+      const buckets = (await getDailyStudySeconds(36500)) ?? [];
+      setStudyBuckets(buckets);
     })();
   }, [user]);
 
@@ -44,7 +85,6 @@ export default function Hub() {
       </div>
     );
   }
-  // user がまだ null のときのフォールバック
   if (!user) {
     return <Navigate to="/login" replace />;
   }
@@ -66,24 +106,26 @@ export default function Hub() {
     </div>
   );
 
-  const Card = ({
-    title,
-    desc,
-    to,
-    stat,
-    emoji,
-    hue = "rose",
-    disabled = false,
-  }: {
+  const Card = (props: {
     title: string;
     desc: string;
     to: string;
-    stat: { total: number; correct: number };
+    stat?: Stat; // 受け取るが未使用（互換のため残す）
     emoji: string;
+    image?: string; // /images/xxx.jpg のルート相対パス
     hue?: "rose" | "violet" | "emerald" | "amber";
     disabled?: boolean;
   }) => {
-    const acc = stat.total ? Math.round((stat.correct / stat.total) * 100) : 0;
+    const {
+      title,
+      desc,
+      to,
+      emoji,
+      image,
+      hue = "rose",
+      disabled = false,
+    } = props;
+
     const ring =
       hue === "rose"
         ? `ring-rose-200 ${disabled ? "" : "hover:ring-rose-300"}`
@@ -92,88 +134,76 @@ export default function Hub() {
         : hue === "emerald"
         ? `ring-emerald-200 ${disabled ? "" : "hover:ring-emerald-300"}`
         : `ring-amber-200 ${disabled ? "" : "hover:ring-amber-300"}`;
-    const grad =
-      hue === "rose"
-        ? "from-rose-50 to-white"
-        : hue === "violet"
-        ? "from-violet-50 to-white"
-        : hue === "emerald"
-        ? "from-emerald-50 to-white"
-        : "from-amber-50 to-white";
 
     const lift = disabled ? "" : "hover:-translate-y-0.5";
 
     return (
       <div
-        className={`flex flex-col justify-between rounded-3xl border shadow-sm ring-1 ${ring} bg-gradient-to-br ${grad} p-5 transition-transform ${lift}`}
+        className={`relative flex flex-col justify-end overflow-hidden rounded-3xl border shadow-sm ring-1 ${ring} p-0 ${lift}`}
+        style={{ minHeight: "220px" }}
       >
-        {/* 上部コンテンツ */}
-        <div>
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">{emoji}</span>
-            <h3 className="font-semibold">
-              {title}{" "}
-              {disabled && <span className="ml-2 chip text-xs">準備中</span>}
-            </h3>
-          </div>
-          <p className="mt-2 text-sm text-slate-600">{desc}</p>
+        {/* 背景画像（軽い拡大／ぼかし無し） */}
+        {image && (
+          <img
+            src={image}
+            alt={title}
+            className="absolute inset-0 h-full w-full object-cover scale-105"
+            loading="lazy"
+            decoding="async"
+          />
+        )}
+        {/* 明るめオーバーレイ（文字を邪魔しない） */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/20 via-white/10 to-transparent" />
 
-          <div className="mt-3 flex items-center gap-3 text-xs text-slate-600">
-            <span className="inline-flex items-center gap-1 rounded-full border px-2 py-1 bg-white/70">
-              📊 総問 {stat.total}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-full border px-2 py-1 bg-white/70">
-              ✅ 正答 {stat.correct}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-full border px-2 py-1 bg-white/70">
-              🎯 {acc}%
-            </span>
+        {/* 前面コンテンツ（中央揃え・タイトルやや上寄せ） */}
+        <div className="relative z-10 p-4 text-center mb-6">
+          <div className="inline-flex items-center gap-2 rounded-xl bg-white/80 backdrop-blur-sm px-2.5 py-1 mx-auto">
+            <span className="text-base">{emoji}</span>
+            <h3 className="font-semibold">{title}</h3>
+            {disabled && <span className="ml-2 chip text-xs">準備中</span>}
           </div>
-        </div>
-
-        {/* 下部中央のボタン */}
-        <div className="mt-6 flex justify-center">
-          {disabled ? (
-            <span
-              className="btn-primary mt-5 px-6 py-2 pointer-events-none select-none"
-              aria-disabled="true"
-              role="button"
-              tabIndex={-1}
-              title="準備中です"
-            >
-              準備中
-            </span>
-          ) : (
-            <Link to={to} className="btn-primary mt-5 px-6 py-2">
-              はじめる <span aria-hidden>→</span>
-            </Link>
-          )}
+          <p className="mt-2 max-w-[90%] rounded-xl bg-white/75 px-3 py-2 text-sm text-slate-700 backdrop-blur-sm mx-auto">
+            {desc}
+          </p>
+          <div className="mt-4 flex justify-center">
+            {disabled ? (
+              <span
+                className="btn-primary px-6 py-2 pointer-events-none select-none"
+                aria-disabled="true"
+                role="button"
+                tabIndex={-1}
+                title="準備中です"
+              >
+                準備中
+              </span>
+            ) : (
+              <Link to={to} className="btn-primary px-6 py-2">
+                はじめる <span aria-hidden>→</span>
+              </Link>
+            )}
+          </div>
         </div>
       </div>
     );
   };
 
-  const totalAttempts =
-    (mod["news-vocab"]?.total ?? 0) +
-    (mod["nominalisation"]?.total ?? 0) +
-    (mod["verb-gym"]?.total ?? 0) +
-    (mod["freewrite"]?.total ?? 0) +
-    (mod["futsuken"]?.total ?? 0);
-
+  // ===== ヒーロー部の表示用集計（全期間） =====
   const totalCorrect =
     (mod["news-vocab"]?.correct ?? 0) +
     (mod["nominalisation"]?.correct ?? 0) +
     (mod["verb-gym"]?.correct ?? 0) +
-    (mod["freewrite"]?.correct ?? 0) +
+    (mod["composition"]?.correct ?? 0) +
     (mod["futsuken"]?.correct ?? 0);
 
-  const totalAcc = totalAttempts
-    ? Math.round((totalCorrect / totalAttempts) * 100)
-    : 0;
+  const totalStudySec = studyBuckets.reduce((s, d) => s + (d.sec ?? 0), 0);
+  const totalStudyHours = Math.floor(totalStudySec / 3600);
+  const totalStudyMinutes = Math.round((totalStudySec % 3600) / 60);
+  const studyDays = studyBuckets.filter((d) => (d.sec ?? 0) > 0).length;
+  const studyStreak = computeStreak(studyBuckets);
 
   return (
     <div className="relative min-h-svh bg-gradient-to-br from-sky-50 via-white to-rose-50">
-      {/* ふわっと背景装飾 */}
+      {/* 背景装飾 */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute -top-24 -left-16 h-72 w-72 rounded-full bg-rose-200/30 blur-3xl" />
         <div className="absolute top-32 -right-10 h-72 w-72 rounded-full bg-violet-200/30 blur-3xl" />
@@ -222,10 +252,21 @@ export default function Hub() {
                 まちがいは宝物。弱点を拾い上げて、得意に変えていこう ✨
               </p>
             </div>
-            <div className="grid grid-cols-3 gap-3 min-w-[260px]">
-              <StatBadge label="総出題" value={totalAttempts} emoji="📊" />
+
+            {/* ★ 新しい4指標（全期間） */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 min-w-[260px]">
+              <StatBadge
+                label="勉強時間（全期間）"
+                value={`${totalStudyHours}時間 ${totalStudyMinutes}分`}
+                emoji="⏱"
+              />
+              <StatBadge
+                label="勉強日数（全期間）"
+                value={studyDays}
+                emoji="📅"
+              />
+              <StatBadge label="連続勉強日数" value={studyStreak} emoji="🔥" />
               <StatBadge label="総正答" value={totalCorrect} emoji="✅" />
-              <StatBadge label="正答率" value={`${totalAcc}%`} emoji="🎯" />
             </div>
           </div>
         </section>
@@ -235,48 +276,55 @@ export default function Hub() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Card
             emoji="📰"
-            title="① 時事単語"
+            title="① 時事単語ドリル"
             desc="ニュース頻出語をカードで学習"
             to="/app/news-vocab"
             stat={mod["news-vocab"]}
             hue="rose"
+            image="/images/vocab.jpg"
             disabled={false}
           />
           <Card
             emoji="✍️"
-            title="② 名詞化ジム"
-            desc="文全体の書き換えで名詞化を体得"
+            title="② 名詞化ドリル"
+            desc="よりハイレベルなフランス語を書く基礎固め"
             to="/app/nominalisation"
             stat={mod["nominalisation"]}
             hue="violet"
+            image="/images/nominalisation.jpg"
             disabled={false}
           />
           <Card
-            emoji="🧩"
-            title="③ 動詞選択＋活用"
-            desc="適切な動詞・時制・一致を選ぶ"
+            emoji="🔤"
+            title="③ 動詞ドリル"
+            desc="会話にも重要な動詞を徹底的に学ぶ"
             to="/app/temps"
             stat={mod["verb-gym"]}
             hue="emerald"
+            image="/images/verbe.jpg"
             disabled={false}
           />
           <Card
             emoji="📝"
-            title="④ 自由作文ループ"
-            desc="作文→フィードバック→再テスト"
-            to="/app/freewrite"
-            stat={mod["freewrite"]}
+            title="④ 仏作文"
+            desc="日常会話で書けそうで書けない文章の特訓"
+            to="/app/composition"
+            stat={mod["composition"]}
             hue="amber"
-            disabled
+            image="/images/composition.jpg"
+            disabled={false}
           />
+          {/* 将来のメニュー
           <Card
             emoji="📚"
             title="⑤ 仏検過去問"
             desc="過去問ドリルで実戦力アップ"
             to="/app/futsuken"
-            stat={mod["futsuken"] ?? { total: 0, correct: 0 }}
+            stat={mod["futsuken"]}
             hue="rose"
-          />
+            image="/images/futsuken.jpg"
+            disabled={true}
+          /> */}
         </div>
       </main>
     </div>

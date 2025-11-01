@@ -6,7 +6,7 @@ import { recordAttempt as recordAttemptLocal } from "./metrics";
 import {
   startSession as startSessionSrv,
   endSession as endSessionSrv,
-  recordAttempt as recordAttemptSrv,
+  recordAttempt as recordAttemptSrv, // supaMetrics.recordAttempt
   saveProgress as saveProgressSrv,
   loadProgress as loadProgressSrv,
   getItemStatsByDir as getItemStatsByDirSrv,
@@ -18,8 +18,8 @@ export type MenuId =
   | "news_vocab"
   | "futsuken"
   | "nominalisation"
-  | "verb_gym"
-  | "freewrite";
+  | "verbe"
+  | "composition";
 
 /** ローカル（metrics.ts）側のモジュールID = kebab-case */
 export type KebabId = LocalModuleId; // "news-vocab" | "nominalisation" | "verb-gym" | "freewrite" | "futsuken"
@@ -32,8 +32,8 @@ const SNAKE_TO_KEBAB: Record<MenuId, KebabId> = {
   news_vocab: "news-vocab",
   futsuken: "futsuken",
   nominalisation: "nominalisation",
-  verb_gym: "verb-gym",
-  freewrite: "freewrite",
+  verbe: "verbe",
+  composition: "composition",
 };
 
 /* =========================================================
@@ -69,21 +69,34 @@ type RecordAttemptArgs = {
 
 /** サーバー → attempts に記録、必要ならローカルにも鏡写し保存 */
 export async function recordAttempt(args: RecordAttemptArgs): Promise<void> {
-  // 1) サーバー保存（supaMetrics.recordAttempt を使用）
-  await recordAttemptSrv({
-    menuId: args.menuId, // snake_case
-    itemId: args.itemId ?? 0,
-    isCorrect: args.isCorrect,
-    skillTags: args.skillTags,
-    meta: args.meta,
-  }); // 2) ローカル保存（任意）
+  // ★★★ 修正点: alsoLocal から uid を取得 ★★★
+  const uid = args.alsoLocal?.userId;
 
+  // ★★★ 修正点: uid が "local" や null/undefined の場合はサーバー保存をスキップ ★★★
+  if (uid && uid !== "local") {
+    // 1) サーバー保存（supaMetrics.recordAttempt を使用）
+    await recordAttemptSrv({
+      uid: uid, // ★★★ 修正点: uid を supaMetrics に渡す ★★★
+      menuId: args.menuId, // snake_case
+      itemId: args.itemId ?? 0,
+      isCorrect: args.isCorrect,
+      skillTags: args.skillTags,
+      meta: args.meta,
+    });
+  } else if (!uid || uid === "local") {
+    // ログイン前に押された場合など（ローカル保存のみ行われる）
+    console.warn(
+      "[recordAttempt] uid is 'local' or missing. Skipping server save."
+    );
+  }
+
+  // 2) ローカル保存（任意）
   if (args.alsoLocal) {
     const moduleId: KebabId =
       args.alsoLocal.localModuleId ?? SNAKE_TO_KEBAB[args.menuId];
 
     recordAttemptLocal({
-      userId: args.alsoLocal.userId,
+      userId: args.alsoLocal.userId, // ここは "local" でもOK
       moduleId, // kebab-case
       correct: args.isCorrect,
       skillTags: args.alsoLocal.localSkillTags ?? [],
@@ -118,16 +131,31 @@ export function loadProgress(
 /* =========================================================
  * 4) 表示用の集計（kebab のまま渡せば OK。supaMetrics 側で kebab/snake を吸収）
  * =======================================================*/
-export function getCountsForItemsByDir(
-  moduleId: KebabId,
+
+type DrillDirUi = "JA2FR" | "FR2JA"; // UI で使う向き
+
+export async function getCountsForItemsByDir(
+  moduleId: UIModuleId,
   itemIds: number[],
-  dir: "JA2FR" | "FR2JA"
-) {
-  return getItemStatsByDirSrv(moduleId, itemIds, dir);
+  dir: DrillDirUi
+): Promise<Map<number, { correct: number; wrong: number }>> {
+  if (itemIds.length === 0) return new Map();
+  // supaMetrics は Map<number, {correct, wrong, lastAt}> を返す前提
+  const m = await getItemStatsByDirSrv(moduleId, itemIds, dir);
+
+  // supaMetrics (getItemStatsByDir) は lastAt を含む Map を返す
+  // この関数 (getCountsForItemsByDir) は lastAt を含まない Map を期待されている
+  const simple = new Map<number, { correct: number; wrong: number }>();
+  if (m) {
+    for (const [k, v] of m) {
+      simple.set(k, { correct: v.correct, wrong: v.wrong });
+    }
+  }
+  return simple;
 }
 
 export function getCountsForItems(moduleId: KebabId, itemIds: number[]) {
-  // supaMetrics の getCountsForItems は lastAt を含まない形式を返す
-  // getItemStats は lastAt を含む形式を返すので、ここでは getCountsForItems を使用
+  // supaMetrics の getItemStats は lastAt を含む
+  // (コメントと異なり、supaMetrics に getCountsForItems は無いので getItemStats を呼ぶ)
   return getItemStatsSrv(moduleId, itemIds);
 }

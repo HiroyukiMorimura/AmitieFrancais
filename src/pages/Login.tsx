@@ -37,7 +37,7 @@ export default function Login() {
   return (
     <div className="relative w-full min-h-svh overflow-hidden">
       <img
-        src="/auth_bg.jpg"
+        src="/images/app_icon.jpg"
         onError={(e) => {
           (e.currentTarget as HTMLImageElement).src =
             "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?q=80&w=1600&auto=format&fit=crop";

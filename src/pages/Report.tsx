@@ -8,7 +8,7 @@ import { listLocalTopics } from "../lib/localNewsSets";
 
 /* ========== 型 ========== */
 
-// ①② 単語ビュー（例: v_user_vocab_stats_14d）
+// ①②④ 単語/問題ビュー（例: v_user_vocab_stats_14d 相当の形）
 type VocabStat = {
   user_id: string;
   word?: string | null;
@@ -19,13 +19,16 @@ type VocabStat = {
   accuracy_percent: number;
 };
 
-// ③ supaMetrics.getDailyStudySeconds() の返り値
+// ⑤ supaMetrics.getDailyStudySeconds() の返り値
 type StudyBucket = {
   day: string; // 'YYYY-MM-DD'
   sec: number;
 };
 
-/* ========== ②の根本修正：単語統計の取得 ========== */
+// 汎用Agg
+type Agg = { attempts: number; corrects: number; wrongs: number };
+
+/* ========== ①（既存）時事単語の統計 ========== */
 
 async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
   const SINCE_DAYS = 14;
@@ -33,11 +36,9 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
     Date.now() - SINCE_DAYS * 86400 * 1000
   ).toISOString();
 
-  // --- 1) attempts から読む（created_at が無い環境にも対応） ---
   type AttemptRow = { item_id: number | null; is_correct: boolean };
   let rowsAttempt: AttemptRow[] = [];
 
-  // まずは created_at 付きで試す
   const tryWithCreated = await supabase
     .from("attempts")
     .select("item_id,is_correct,created_at,menu_id")
@@ -49,7 +50,6 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
   if (!tryWithCreated.error && tryWithCreated.data) {
     rowsAttempt = tryWithCreated.data as AttemptRow[];
   } else {
-    // created_at が無い or 列名違い → 期間フィルタ無しで再取得
     const fallback = await supabase
       .from("attempts")
       .select("item_id,is_correct,menu_id")
@@ -59,11 +59,9 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
     rowsAttempt = (fallback.data as AttemptRow[]) ?? [];
   }
 
-  const rows = rowsAttempt; // ← legacyを合算しない場合はこちら
-
+  const rows = rowsAttempt;
   if (!rows || rows.length === 0) return [];
 
-  // --- 2) item_id ごとに集計 ---
   const aggMap = new Map<
     number,
     { attempts: number; corrects: number; wrongs: number }
@@ -83,11 +81,9 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
   const itemIds = [...aggMap.keys()];
   if (itemIds.length === 0) return [];
 
-  // --- 3) ラベル解決（まずは remote: vocab_pairs） ---
+  // ラベル解決（ローカルニュースセットから）
   const labelMap = new Map<number, string>();
   const unresolved = new Set(itemIds);
-
-  // すべてのローカルトピックを走査
   const locals = listLocalTopics();
   for (const t of locals) {
     if (!isLocalTopicId(t.id)) continue;
@@ -101,7 +97,6 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
     if (unresolved.size === 0) break;
   }
 
-  // --- 5) VocabStat に整形して、正答率の低い順に返す ---
   const stats: VocabStat[] = itemIds.map((id) => {
     const a = aggMap.get(id)!;
     const acc = a.attempts ? Math.round((a.corrects / a.attempts) * 100) : 0;
@@ -119,10 +114,8 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
   return stats.sort((x, y) => x.accuracy_percent - y.accuracy_percent);
 }
 
-// types
-type Agg = { attempts: number; corrects: number; wrongs: number };
+/* ========== 共通：attempts から任意メニューの集計 ========== */
 
-// attempts から任意の menu_id 群を集計（snake/kebab 両方渡してもOK）
 async function fetchAggFromAttempts(
   uid: string,
   menuIds: string[]
@@ -149,7 +142,8 @@ async function fetchAggFromAttempts(
   return agg;
 }
 
-// 名詞化ジムのTSVローダー（Report.tsx用）
+/* ========== ② 名詞化ローダ（既存） ========== */
+
 async function loadNominalisationPart(n: number) {
   try {
     const url = new URL(
@@ -207,10 +201,8 @@ async function loadNominalisationPart(n: number) {
 
       if (!base || !nominal) return;
 
-      // **...** を除去
       base = base.replace(/\*\*/g, "").replace(/\*/g, "").trim();
 
-      // IDの生成（Nominalisation.tsxと同じロジック）
       let id: number;
       if (hasHeader) {
         const rawId = iId !== -1 ? cols[iId]?.trim() : undefined;
@@ -219,7 +211,6 @@ async function loadNominalisationPart(n: number) {
       } else {
         id = n * 1_000_000 + lineIdx;
       }
-
       pairs.push({ id, base, nominal, ja });
     });
 
@@ -234,8 +225,6 @@ async function resolveNominalisationLabels(
   ids: number[]
 ): Promise<Map<number, string>> {
   const m = new Map<number, string>();
-
-  // 全7パートを読み込み
   const allPairs: Array<{
     id: number;
     base: string;
@@ -248,35 +237,275 @@ async function resolveNominalisationLabels(
     allPairs.push(...pairs);
   }
 
-  // IDをキーにラベルを設定
   for (const p of allPairs) {
     if (ids.includes(p.id)) {
-      // 「元の単語 → 名詞化」の形式で表示
       m.set(p.id, `${p.base} → ${p.nominal}`);
     }
   }
-
-  // 見つからなかったIDは#番号で表示
   for (const id of ids) {
-    if (!m.has(id)) {
-      m.set(id, `#${id}`);
-    }
+    if (!m.has(id)) m.set(id, `#${id}`);
   }
-
   return m;
 }
 
-/* ========== Report 本体 ========== */
+/* ========== ③ 動詞（Verbe）ローダ & 集計 ========== */
 
+type VerbeCategory = "normal" | "refl";
+const VERBE_PARTS: Record<VerbeCategory, number[]> = {
+  normal: [1, 2, 3, 4, 5],
+  refl: [1, 2],
+};
+
+// 安定ID（Verbe.tsx と同一設計）
+function verbeStableId(cat: VerbeCategory, part: number, lineIdx: number) {
+  const catCode = cat === "normal" ? 1 : 2;
+  return catCode * 1_000_000 + part * 10_000 + (lineIdx + 1);
+}
+
+function parseVerbeTsv(text: string): Array<{ fr: string; ja: string }> {
+  const lines = text
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .split(/\r?\n/);
+  if (!lines.length) return [];
+  const head = lines[0].split("\t").map((h) => h.trim().toLowerCase());
+  const hasHeader =
+    ["fr", "français", "フランス語"].some((k) => head.includes(k)) &&
+    ["ja", "japonais", "日本語"].some((k) => head.includes(k));
+  const body = hasHeader ? lines.slice(1) : lines;
+
+  const iFR = hasHeader
+    ? head.findIndex((h) => ["fr", "français", "フランス語"].includes(h))
+    : 0;
+  const iJA = hasHeader
+    ? head.findIndex((h) => ["ja", "japonais", "日本語"].includes(h))
+    : 1;
+
+  const out: Array<{ fr: string; ja: string }> = [];
+  body.forEach((row) => {
+    const cols = row.split("\t");
+    const fr = (cols[iFR] ?? "").trim();
+    const ja = (cols[iJA] ?? "").trim();
+    if (fr && ja) out.push({ fr, ja });
+  });
+  return out;
+}
+
+async function loadVerbePart(cat: VerbeCategory, part: number) {
+  const fname =
+    cat === "normal"
+      ? `verbesNormalesList-${part}.tsv`
+      : `verbesPronominauxList-${part}.tsv`;
+  const url = new URL(`../data/verbe/${fname}`, import.meta.url).toString();
+  try {
+    const t = await fetch(url).then((r) => {
+      if (!r.ok) throw new Error(`TSV load failed: ${fname}`);
+      return r.text();
+    });
+    return parseVerbeTsv(t).map((p, idx) => ({
+      id: verbeStableId(cat, part, idx),
+      ja: p.ja,
+      fr: p.fr,
+    }));
+  } catch {
+    if (cat === "refl") {
+      // fallback: Prominaux 綴り
+      const alt = `verbesProminauxList-${part}.tsv`;
+      const url2 = new URL(`../data/verbe/${alt}`, import.meta.url).toString();
+      try {
+        const t2 = await fetch(url2).then((r) => {
+          if (!r.ok) throw new Error(`TSV load failed: ${alt}`);
+          return r.text();
+        });
+        return parseVerbeTsv(t2).map((p, idx) => ({
+          id: verbeStableId(cat, part, idx),
+          ja: p.ja,
+          fr: p.fr,
+        }));
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
+}
+
+async function resolveVerbeLabels(ids: number[]): Promise<Map<number, string>> {
+  const need = new Set(ids);
+  const m = new Map<number, string>();
+  for (const cat of ["normal", "refl"] as VerbeCategory[]) {
+    for (const part of VERBE_PARTS[cat]) {
+      const pairs = await loadVerbePart(cat, part);
+      for (const p of pairs) {
+        if (need.has(p.id)) {
+          m.set(p.id, `${p.ja} — ${p.fr}`);
+          need.delete(p.id);
+        }
+      }
+      if (need.size === 0) return m;
+    }
+  }
+  for (const id of need) m.set(id, `#${id}`);
+  return m;
+}
+
+async function fetchVerbeStats(uid: string): Promise<VocabStat[]> {
+  // menu_id は 'verbe'（snake/kebab同形）を想定
+  const agg = await fetchAggFromAttempts(uid, ["verbe", "verbe"]);
+  if (agg.size === 0) return [];
+
+  const ids = [...agg.keys()];
+  const labels = await resolveVerbeLabels(ids);
+
+  const rows: VocabStat[] = ids.map((id) => {
+    const a = agg.get(id)!;
+    const acc = a.attempts ? Math.round((a.corrects / a.attempts) * 100) : 0;
+    return {
+      user_id: uid,
+      word: labels.get(id) ?? `#${id}`,
+      lemma: null,
+      attempts: a.attempts,
+      corrects: a.corrects,
+      wrongs: a.wrongs,
+      accuracy_percent: acc,
+    };
+  });
+
+  return rows.sort((x, y) =>
+    x.accuracy_percent !== y.accuracy_percent
+      ? x.accuracy_percent - y.accuracy_percent
+      : (y.attempts ?? 0) - (x.attempts ?? 0)
+  );
+}
+
+/* ========== ④ 仏作文（Composition）ローダ & 集計 ========== */
+
+type CompPair = { id: number; ja: string; fr: string };
+
+function parseCompositionTsv(text: string): CompPair[] {
+  const lines = text
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .split(/\r?\n/);
+  if (!lines.length) return [];
+  const head = lines[0].split("\t").map((h) => h.trim().toLowerCase());
+  const hasHeader =
+    ["fr", "français", "フランス語"].some((k) => head.includes(k)) &&
+    ["ja", "japonais", "日本語"].some((k) => head.includes(k));
+  const body = hasHeader ? lines.slice(1) : lines;
+
+  const iFR = hasHeader
+    ? head.findIndex((h) => ["fr", "français", "フランス語"].includes(h))
+    : 1;
+  const iJA = hasHeader
+    ? head.findIndex((h) => ["ja", "japonais", "日本語"].includes(h))
+    : 0;
+
+  const out: CompPair[] = [];
+  body.forEach((row, idx) => {
+    const cols = row.split("\t");
+    const fr = (cols[iFR] ?? "").trim();
+    const ja = (cols[iJA] ?? "").trim();
+    if (!fr || !ja) return;
+
+    // ★ attempts 側と同じ桁（1000000台）で安定IDを付与
+    const id = 1_000_000 + (idx + 1);
+    out.push({ id, ja, fr });
+  });
+  return out;
+}
+
+async function loadCompositionPairs(): Promise<CompPair[]> {
+  try {
+    const url = new URL(
+      `../data/Composition/compositionList.tsv`,
+      import.meta.url
+    ).toString();
+    const text = await fetch(url).then((r) => {
+      if (!r.ok) throw new Error("TSV load failed: compositionList.tsv");
+      return r.text();
+    });
+    return parseCompositionTsv(text);
+  } catch {
+    return [];
+  }
+}
+
+async function resolveCompositionLabels(
+  ids: number[]
+): Promise<Map<number, string>> {
+  const m = new Map<number, string>();
+  const pairs = await loadCompositionPairs();
+  const need = new Set(ids);
+
+  // ★ 両方式のIDをどちらも解決：
+  //   - 1-based:            1, 2, ...
+  //   - 1000000 + 1-based:  1000001, 1000002, ...
+  pairs.forEach((p, idx) => {
+    const id1 = idx + 1; // 1始まり
+    const id2 = 1_000_000 + (idx + 1); // 1000001始まり
+    const labelJaOnly = p.ja; // ★ 日本語のみ表示
+
+    if (need.has(id1)) {
+      m.set(id1, labelJaOnly);
+      need.delete(id1);
+    }
+    if (need.has(id2)) {
+      m.set(id2, labelJaOnly);
+      need.delete(id2);
+    }
+  });
+
+  // 未解決は #id のまま（データ外）
+  for (const id of need) m.set(id, `#${id}`);
+  return m;
+}
+
+async function fetchCompositionStats(uid: string): Promise<VocabStat[]> {
+  // attempts から composition の集計
+  const agg = await fetchAggFromAttempts(uid, ["composition"]);
+  if (agg.size === 0) return [];
+
+  const ids = [...agg.keys()];
+  const labels = await resolveCompositionLabels(ids);
+
+  const rows: VocabStat[] = ids.map((id) => {
+    const a = agg.get(id)!;
+    const acc = a.attempts ? Math.round((a.corrects / a.attempts) * 100) : 0;
+    return {
+      user_id: uid,
+      word: labels.get(id) ?? `#${id}`,
+      lemma: null,
+      attempts: a.attempts,
+      corrects: a.corrects,
+      wrongs: a.wrongs,
+      accuracy_percent: acc,
+    };
+  });
+
+  // 「間違えた Best」らしく、wrongs 降順 → attempts 降順 → acc 昇順
+  return rows.sort(
+    (a, b) =>
+      (b.wrongs ?? 0) - (a.wrongs ?? 0) ||
+      (b.attempts ?? 0) - (a.attempts ?? 0) ||
+      a.accuracy_percent - b.accuracy_percent
+  );
+}
+
+/* ========== Report 本体 ========== */
 export default function Report() {
   const [loading, setLoading] = useState(true);
 
-  // ①②
+  // ① 時事単語
   const [vocabStats, setVocabStats] = useState<VocabStat[]>([]);
-  // ③
-  const [studyBuckets, setStudyBuckets] = useState<StudyBucket[]>([]);
-
+  // ③ 動詞
+  const [verbeStats, setVerbeStats] = useState<VocabStat[]>([]);
+  // ② 名詞化
   const [nominoStats, setNominoStats] = useState<VocabStat[]>([]);
+  // ④ 仏作文
+  const [compStats, setCompStats] = useState<VocabStat[]>([]);
+  // ⑤ 学習時間（全体）
+  const [studyBuckets, setStudyBuckets] = useState<StudyBucket[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -286,7 +515,9 @@ export default function Report() {
         const uid = auth.user?.id;
         if (!uid) {
           setVocabStats([]);
+          setVerbeStats([]);
           setNominoStats([]);
+          setCompStats([]);
           setStudyBuckets([]);
           return;
         }
@@ -316,11 +547,23 @@ export default function Report() {
                 accuracy_percent: acc,
               };
             })
-            .sort((x, y) => x.accuracy_percent - y.accuracy_percent);
+            .sort((x, y) =>
+              x.accuracy_percent !== y.accuracy_percent
+                ? x.accuracy_percent - y.accuracy_percent
+                : (y.attempts ?? 0) - (x.attempts ?? 0)
+            );
           setNominoStats(rows);
         }
 
-        // ③ 勉強時間
+        // ③ 動詞（Verbe）
+        const vbs = await fetchVerbeStats(uid);
+        setVerbeStats(vbs);
+
+        // ④ 仏作文（Composition）
+        const cs = await fetchCompositionStats(uid);
+        setCompStats(cs);
+
+        // ⑤ 勉強時間（全体）
         const buckets = await getDailyStudySeconds(14);
         setStudyBuckets(buckets ?? []);
       } finally {
@@ -329,7 +572,7 @@ export default function Report() {
     })();
   }, []);
 
-  /* ====== ① 単語の正答率のまとめ ====== */
+  /* ====== ① 集計まとめ（ニュース単語） ====== */
   const vocabTotals = useMemo(() => {
     const attempts = vocabStats.reduce((s, x) => s + (x.attempts ?? 0), 0);
     const corrects = vocabStats.reduce((s, x) => s + (x.corrects ?? 0), 0);
@@ -338,29 +581,77 @@ export default function Report() {
     return { attempts, corrects, wrongs, acc };
   }, [vocabStats]);
 
-  /* ====== ② 苦手な単語 Best 10（attempts >= 2） ====== */
+  /* ====== ③ 動詞の集計まとめ ====== */
+  const verbeTotals = useMemo(() => {
+    const attempts = verbeStats.reduce((s, x) => s + (x.attempts ?? 0), 0);
+    const corrects = verbeStats.reduce((s, x) => s + (x.corrects ?? 0), 0);
+    const wrongs = verbeStats.reduce((s, x) => s + (x.wrongs ?? 0), 0);
+    const acc = attempts ? Math.round((corrects / attempts) * 100) : 0;
+    return { attempts, corrects, wrongs, acc };
+  }, [verbeStats]);
+
+  /* ====== ④ 仏作文の集計まとめ & Best3 ====== */
+  const compTotals = useMemo(() => {
+    const attempts = compStats.reduce((s, x) => s + (x.attempts ?? 0), 0);
+    const corrects = compStats.reduce((s, x) => s + (x.corrects ?? 0), 0);
+    const wrongs = compStats.reduce((s, x) => s + (x.wrongs ?? 0), 0);
+    const acc = attempts ? Math.round((corrects / attempts) * 100) : 0;
+    return { attempts, corrects, wrongs, acc };
+  }, [compStats]);
+
+  const hardestCompositions = useMemo(
+    () =>
+      compStats
+        .filter((x) => (x.attempts ?? 0) >= 1)
+        .slice()
+        .sort(
+          (a, b) =>
+            (b.wrongs ?? 0) - (a.wrongs ?? 0) ||
+            (b.attempts ?? 0) - (a.attempts ?? 0) ||
+            a.accuracy_percent - b.accuracy_percent
+        )
+        .slice(0, 3),
+    [compStats]
+  );
+
+  /* ====== 苦手な単語/動詞 Best 10（attempts >= 2） ====== */
   const hardestWords = useMemo(
     () =>
       vocabStats
         .filter((x) => (x.attempts ?? 0) >= 2)
-        .sort((a, b) => {
-          if (a.accuracy_percent !== b.accuracy_percent) {
-            return a.accuracy_percent - b.accuracy_percent; // 低い順
-          }
-          return (b.attempts ?? 0) - (a.attempts ?? 0); // 同率なら試行多い方を先に
-        })
+        .sort((a, b) =>
+          a.accuracy_percent !== b.accuracy_percent
+            ? a.accuracy_percent - b.accuracy_percent
+            : (b.attempts ?? 0) - (a.attempts ?? 0)
+        )
         .slice(0, 10),
     [vocabStats]
   );
 
+  const hardestVerbs = useMemo(
+    () =>
+      verbeStats
+        .filter((x) => (x.attempts ?? 0) >= 2)
+        .slice()
+        .sort((a, b) =>
+          a.accuracy_percent !== b.accuracy_percent
+            ? a.accuracy_percent - b.accuracy_percent
+            : (b.attempts ?? 0) - (a.attempts ?? 0)
+        )
+        .slice(0, 10),
+    [verbeStats]
+  );
+
+  /* ====== 全体学習時間（⑤）の集計 ====== */
   const studyTotals = useMemo(() => {
     const totalSec = studyBuckets.reduce((s, d) => s + (d.sec ?? 0), 0);
-    const dayCount = Math.max(studyBuckets.length, 14); // 欠損日のための見かけの日数
+    const dayCount = Math.max(studyBuckets.length, 14);
     const avgPerDayMin = dayCount ? Math.round(totalSec / 60 / dayCount) : 0;
     const totalHours = Math.floor(totalSec / 3600);
     const remMinutes = Math.round((totalSec % 3600) / 60);
     return { totalSec, totalHours, remMinutes, avgPerDayMin, dayCount };
   }, [studyBuckets]);
+
   return (
     <div className="min-h-svh bg-slate-50">
       {/* ヘッダー */}
@@ -392,9 +683,7 @@ export default function Report() {
               データがありません。まずは学習を始めましょう。
             </p>
           ) : (
-            // ★ 常に縦並び（1カラム）に変更：左右に並べない
             <div className="mt-3 flex flex-col gap-4">
-              {/* 上：単語の正答率のまとめ */}
               <div className="rounded-xl border p-3 bg-white">
                 <h3 className="text-sm font-semibold">単語の正答率のまとめ</h3>
                 <div className="mt-2 grid sm:grid-cols-2 gap-3">
@@ -411,11 +700,8 @@ export default function Report() {
                 </div>
               </div>
 
-              {/* 下：苦手な単語 Best 10 */}
               <div className="rounded-xl border p-3 bg-white">
-                <h3 className="text-sm font-semibold">
-                  苦手な単語 Best 10（attempts ≥ 2）
-                </h3>
+                <h3 className="text-sm font-semibold">苦手な単語 Best 10</h3>
                 {hardestWords.length === 0 ? (
                   <p className="text-slate-600 text-sm mt-2">
                     データがありません。
@@ -453,6 +739,7 @@ export default function Report() {
             </div>
           )}
         </section>
+
         {/* ② 名詞化ジム */}
         <section id="nominalisation" className="glass-card p-4 scroll-mt-24">
           <div className="flex items-center justify-between">
@@ -467,7 +754,6 @@ export default function Report() {
             </p>
           ) : (
             <div className="mt-3 flex flex-col gap-4">
-              {/* 概要 */}
               <div className="rounded-xl border p-3 bg-white">
                 <h3 className="text-sm font-semibold">単語の正答率のまとめ</h3>
                 <div className="mt-2 grid sm:grid-cols-2 gap-3">
@@ -506,11 +792,8 @@ export default function Report() {
                 </div>
               </div>
 
-              {/* 苦手 Best 10 */}
               <div className="rounded-xl border p-3 bg-white">
-                <h3 className="text-sm font-semibold">
-                  苦手な問題 Best 10（attempts ≥ 2）
-                </h3>
+                <h3 className="text-sm font-semibold">苦手な問題 Best 10</h3>
                 {nominoStats.filter((x) => (x.attempts ?? 0) >= 2).length ===
                 0 ? (
                   <p className="text-slate-600 text-sm mt-2">
@@ -557,9 +840,156 @@ export default function Report() {
             </div>
           )}
         </section>
-        {/* ③ 勉強時間 */}
+
+        {/* ③ 動詞（Verbe） */}
+        <section id="verbe" className="glass-card p-4 scroll-mt-24">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold">③ 動詞（Verbe）</h2>
+          </div>
+
+          {loading ? (
+            <p className="text-slate-600 text-sm mt-2">読み込み中…</p>
+          ) : verbeStats.length === 0 ? (
+            <p className="text-slate-600 text-sm mt-2">
+              データがありません。まずは学習を始めましょう。
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-col gap-4">
+              {/* 正答率のまとめ */}
+              <div className="rounded-xl border p-3 bg-white">
+                <h3 className="text-sm font-semibold">動詞の正答率のまとめ</h3>
+                <div className="mt-2 grid sm:grid-cols-2 gap-3">
+                  <StatItem
+                    label="今まで学習した動詞"
+                    value={verbeTotals.attempts}
+                  />
+                  <StatItem label="正答（動詞）" value={verbeTotals.corrects} />
+                  <StatItem label="誤答（動詞）" value={verbeTotals.wrongs} />
+                  <StatItem
+                    label="正答率（動詞）"
+                    value={`${verbeTotals.acc}%`}
+                  />
+                </div>
+              </div>
+
+              {/* 苦手な動詞 Best 10 */}
+              <div className="rounded-xl border p-3 bg-white">
+                <h3 className="text-sm font-semibold">
+                  苦手な動詞 Best 10（attempts ≥ 2）
+                </h3>
+                {hardestVerbs.length === 0 ? (
+                  <p className="text-slate-600 text-sm mt-2">
+                    該当データがありません。
+                  </p>
+                ) : (
+                  <ul className="mt-3 space-y-2">
+                    {hardestVerbs.map((w, i) => {
+                      const label =
+                        (w.word && w.word.trim()) ||
+                        (w.lemma && w.lemma.trim()) ||
+                        "（不明）";
+                      return (
+                        <li
+                          key={`${label}-${i}`}
+                          className="rounded-lg border p-2 bg-white"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm font-medium">
+                              {i + 1}. {label}
+                            </div>
+                            <div className="text-xs text-slate-600">
+                              正答率 {w.accuracy_percent}%（{w.corrects}/
+                              {w.attempts}）
+                            </div>
+                          </div>
+                          <ProgressBar
+                            percent={safePercent(w.accuracy_percent)}
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ④ 仏作文（Composition） */}
+        <section id="composition" className="glass-card p-4 scroll-mt-24">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold">④ 仏作文（Composition）</h2>
+          </div>
+
+          {loading ? (
+            <p className="text-slate-600 text-sm mt-2">読み込み中…</p>
+          ) : compStats.length === 0 ? (
+            <p className="text-slate-600 text-sm mt-2">
+              データがありません。まずは学習を始めましょう。
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-col gap-4">
+              {/* 正答率のまとめ */}
+              <div className="rounded-xl border p-3 bg-white">
+                <h3 className="text-sm font-semibold">正答率のまとめ</h3>
+                <div className="mt-2 grid sm:grid-cols-2 gap-3">
+                  <StatItem
+                    label="今まで学習した問題"
+                    value={compTotals.attempts}
+                  />
+                  <StatItem label="正答（回）" value={compTotals.corrects} />
+                  <StatItem label="誤答（回）" value={compTotals.wrongs} />
+                  <StatItem
+                    label="正答率（全体）"
+                    value={`${compTotals.acc}%`}
+                  />
+                </div>
+              </div>
+
+              {/* 間違えた Best 3 */}
+              <div className="rounded-xl border p-3 bg-white">
+                <h3 className="text-sm font-semibold">苦手な問題 Best 3</h3>
+                {hardestCompositions.length === 0 ? (
+                  <p className="text-slate-600 text-sm mt-2">
+                    該当データがありません。
+                  </p>
+                ) : (
+                  <ul className="mt-3 space-y-2">
+                    {hardestCompositions.map((w, i) => {
+                      const label =
+                        (w.word && w.word.trim()) ||
+                        (w.lemma && w.lemma.trim()) ||
+                        "（不明）";
+                      return (
+                        <li
+                          key={`${label}-${i}`}
+                          className="rounded-lg border p-2 bg-white"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm font-medium">
+                              {i + 1}. {label}
+                            </div>
+                            <div className="text-xs text-slate-600">
+                              正答率 {w.accuracy_percent}%（{w.corrects}/
+                              {w.attempts}）
+                            </div>
+                          </div>
+                          <ProgressBar
+                            percent={safePercent(w.accuracy_percent)}
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ⑤ 勉強時間（全体） */}
         <section className="glass-card p-4">
-          <h2 className="font-semibold">③ 勉強時間（直近14日）</h2>
+          <h2 className="font-semibold">⑤ 勉強時間（直近14日・全体）</h2>
           {loading ? (
             <p className="text-slate-600 text-sm mt-2">読み込み中…</p>
           ) : studyBuckets.length === 0 ? (
@@ -598,7 +1028,6 @@ export default function Report() {
                           <span className="font-medium">{d.day}</span>
                           <span>{minutes}分</span>
                         </div>
-                        {/* 1日180分を100%として進捗バー表示（必要に応じて基準変更） */}
                         <ProgressBar percent={toPercent(minutes, 180)} />
                       </div>
                     );

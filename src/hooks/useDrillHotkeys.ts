@@ -56,13 +56,11 @@ export function useDrillHotkeys(args: HotkeyArgs) {
         case "KeyS": {
           // 表示済みのときだけ「正解」
           if (revealed) onCorrect();
-          else setRevealed(true);
           break;
         }
         case "KeyF": {
           // 表示済みのときだけ「不正解」
           if (revealed) onWrong();
-          else setRevealed(true);
           break;
         }
         case "ArrowRight":

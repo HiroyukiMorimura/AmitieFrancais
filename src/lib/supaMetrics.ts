@@ -6,8 +6,8 @@ export type MenuId =
   | "news_vocab"
   | "futsuken"
   | "nominalisation"
-  | "verb_gym"
-  | "freewrite";
+  | "verbe"
+  | "composition";
 
 /* ユーザーID取得 */
 export async function getUid(): Promise<string | null> {
@@ -46,6 +46,7 @@ export async function endSession(
 
 /* ========== 正誤イベント（attempts に書く） ========== */
 export async function recordAttempt(args: {
+  uid: string;
   menuId: MenuId; // ← snake_case で渡す
   itemId: number;
   isCorrect: boolean;
@@ -54,17 +55,13 @@ export async function recordAttempt(args: {
   /** 互換用（無視されます） */
   alsoLocal?: unknown;
 }): Promise<void> {
-  const uid = await getUid();
-  if (!uid) {
-    console.warn("[recordAttempt] no uid (not logged in)");
-    return;
-  }
-  // attempts の最小カラムのみ確実に投入（余計なカラムは入れない）
+  // (前回の修正を反映済み)
   const { error } = await supabase.from("attempts").insert({
-    user_id: uid,
+    user_id: args.uid,
     menu_id: args.menuId, // snake
     item_id: args.itemId,
     is_correct: args.isCorrect,
+    meta: args.meta,
   });
   if (error) console.warn("[attempts.insert] error:", error);
 }
@@ -156,6 +153,7 @@ function mergeMap<
   return out;
 }
 
+// (※ rpc_get_item_stats は Invoker/bigint[] のままなので、map(String) が正しい)
 async function callItemStatsOnce(
   menuId: string,
   itemIds: number[]
@@ -164,12 +162,15 @@ async function callItemStatsOnce(
   try {
     const { data, error } = await supabase.rpc("rpc_get_item_stats", {
       menu_id: menuId,
-      item_ids: itemIds,
+      item_ids: itemIds.map(String), // 'bigint[]' なので map(String) のまま
     });
-    if (error || !data) return new Map();
+    if (error || !data) {
+      if (error) console.warn("[rpc_get_item_stats] Supabase error:", error);
+      return new Map();
+    }
     const m = new Map<number, Stat>();
     (data as ItemStatRow[]).forEach((r) => {
-      m.set(r.item_id, {
+      m.set(Number(r.item_id), {
         correct: r.correct,
         wrong: r.wrong,
         lastAt: r.last_at ?? null,
@@ -177,7 +178,7 @@ async function callItemStatsOnce(
     });
     return m;
   } catch (e) {
-    console.warn("[rpc_get_item_stats] error:", e);
+    console.warn("[rpc_get_item_stats] catch error:", e);
     return new Map();
   }
 }
@@ -196,15 +197,21 @@ async function callItemStatsByDirOnce(
 ): Promise<Map<number, Stat>> {
   if (itemIds.length === 0) return new Map();
   try {
+    // ★★★ 修正：Invoker版のシグネチャ (p_menu_id, p_item_ids: integer[]) に合わせる ★★★
     const { data, error } = await supabase.rpc("rpc_get_item_stats_by_dir", {
-      p_menu_id: menuId,
-      p_item_ids: itemIds,
+      p_menu_id: menuId, // 'p_menu' -> 'p_menu_id'
+      p_item_ids: itemIds, // 'map(String)' -> 'itemIds' (number[])
       p_dir: dir,
     });
-    if (error || !data) return new Map();
+
+    if (error || !data) {
+      if (error)
+        console.warn("[rpc_get_item_stats_by_dir] Supabase error:", error);
+      return new Map();
+    }
     const m = new Map<number, Stat>();
     (data as ItemStatRowByDir[]).forEach((r) =>
-      m.set(r.item_id, {
+      m.set(Number(r.item_id), {
         correct: r.correct_count,
         wrong: r.wrong_count,
         lastAt: r.last_at,
@@ -212,7 +219,7 @@ async function callItemStatsByDirOnce(
     );
     return m;
   } catch (e) {
-    console.warn("[rpc_get_item_stats_by_dir] error:", e);
+    console.warn("[rpc_get_item_stats_by_dir] catch error:", e);
     return new Map();
   }
 }

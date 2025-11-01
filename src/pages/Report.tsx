@@ -1,5 +1,5 @@
 // src/pages/Report.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { getDailyStudySeconds } from "../lib/supaMetrics";
@@ -496,6 +496,9 @@ async function fetchCompositionStats(uid: string): Promise<VocabStat[]> {
 export default function Report() {
   const [loading, setLoading] = useState(true);
 
+  // ルートDOM参照（HTML保存で使用）
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
   // ① 時事単語
   const [vocabStats, setVocabStats] = useState<VocabStat[]>([]);
   // ③ 動詞
@@ -653,7 +656,7 @@ export default function Report() {
   }, [studyBuckets]);
 
   return (
-    <div className="min-h-svh bg-slate-50">
+    <div ref={rootRef} className="min-h-svh bg-slate-50">
       {/* ヘッダー */}
       <header className="bg-white border-b sticky top-0 z-10">
         <div className="mx-auto max-w-screen-xl px-4 py-4 flex items-center justify-between">
@@ -665,6 +668,12 @@ export default function Report() {
             >
               ⏱ 学習時間ページへ
             </Link>
+            <button
+              onClick={() => exportReportHTML(rootRef.current)}
+              className="rounded-xl border bg-white/90 px-3 py-1.5 text-sm shadow hover:bg-slate-50"
+            >
+              💾 HTML保存
+            </button>
           </div>
         </div>
       </header>
@@ -1076,4 +1085,53 @@ function safePercent(n: number) {
 function toPercent(valueMin: number, baseMin: number) {
   if (baseMin <= 0) return 0;
   return safePercent((valueMin / baseMin) * 100);
+}
+
+/**
+ * 現在表示中のレポートを独立HTMLとして保存
+ * - Tailwind CDNを読み込み（オンライン時は本番に近い見た目）
+ * - 簡易フォールバックCSS（.glass-card, body背景）を同梱
+ * - 完全オフラインでの本番同等見た目が必要なら、ビルド済みCSSをインラインに差し替えてください
+ */
+function exportReportHTML(root: HTMLElement | null) {
+  if (!root) return;
+
+  const contentHTML = root.outerHTML;
+
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const fname = `report-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+    now.getDate()
+  )}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(
+    now.getSeconds()
+  )}.html`;
+
+  const htmlDoc = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>学習レポート</title>
+  <!-- Tailwind CDN（オンライン時にスタイル適用） -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* アプリ専用のクラス等がCDNに無い場合のフォールバック */
+    .glass-card{background:rgba(255,255,255,0.9);border:1px solid rgba(15,23,42,0.08);border-radius:0.75rem;box-shadow:0 1px 2px rgba(0,0,0,0.06);} 
+    body{background:#f8fafc;}
+  </style>
+</head>
+<body>
+${contentHTML}
+</body>
+</html>`;
+
+  const blob = new Blob([htmlDoc], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fname;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }

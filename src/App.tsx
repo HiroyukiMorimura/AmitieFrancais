@@ -13,7 +13,6 @@ import StudyTime from "./pages/StudyTime";
 import Futsuken from "./pages/Futsuken";
 import CompositionPage from "./pages/Composition";
 
-import { VerbGymStub, FreewriteStub } from "./pages/stubs/ModuleStub";
 import Nominalisation from "./pages/Nominalisation";
 import Temps from "./pages/Verbe";
 
@@ -90,16 +89,6 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-
-        <Route
-          path="/app/verb-gym"
-          element={
-            <ProtectedRoute>
-              <VerbGymStub />
-            </ProtectedRoute>
-          }
-        />
-
         <Route
           path="/app/temps"
           element={
@@ -108,16 +97,6 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-
-        <Route
-          path="/app/freewrite"
-          element={
-            <ProtectedRoute>
-              <FreewriteStub />
-            </ProtectedRoute>
-          }
-        />
-
         <Route
           path="/app/futsuken"
           element={

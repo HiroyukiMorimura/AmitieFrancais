@@ -8,7 +8,8 @@ export type LocalPair = { id: number; ja: string; fr: string };
 
 // news-sets 配下のすべてのサブフォルダを対象
 const modules = import.meta.glob("/src/data/news-sets/**/*.txt", {
-  as: "raw",
+  query: "?raw",
+  import: "default",
   eager: true,
 }) as Record<string, string>;
 
@@ -47,6 +48,7 @@ const FOLDER_TO_JA: Record<string, string> = {
   international: "国際",
   france: "フランス",
   japan: "日本",
+  tourisme: "観光",
 };
 
 // 装飾/国旗行のスキップ

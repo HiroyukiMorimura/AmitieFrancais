@@ -416,13 +416,20 @@ export default function Verbe() {
     setRevealed(false);
   };
 
-  // ★★★ 修正点 2：ここから ★★★
-  // 常に優先順位ロジック（goNextPrioritized）を呼ぶように修正
-  const onNext = () => {
+  const onManualNext = () => {
+    if (pairs.length === 0) return;
+    pushRecent(pairs[idx]?.id ?? null);
+    setIdx((prev) => {
+      const next = prev + 1;
+      return next >= pairs.length ? 0 : next;
+    });
+    setRevealed(false);
+  };
+
+  const onAutoNext = () => {
     if (pairs.length === 0) return;
     goNextPrioritized();
   };
-  // ★★★ 修正点 2：ここまで ★★★
 
   // 正誤の記録（方向別・snake 書き込み）
   const mark = async (kind: "correct" | "wrong") => {
@@ -535,7 +542,7 @@ export default function Verbe() {
     setRevealed,
     onCorrect: () => void mark("correct"),
     onWrong: () => void mark("wrong"),
-    onNext,
+    onNext: onAutoNext,
     onPrev,
   });
 
@@ -696,7 +703,7 @@ export default function Verbe() {
                 revealed={revealed}
                 setRevealed={setRevealed}
                 onPrev={onPrev}
-                onNext={onNext}
+                onNext={onManualNext}
                 dir={dir}
                 stat={
                   card

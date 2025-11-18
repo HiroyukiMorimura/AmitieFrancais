@@ -407,9 +407,17 @@ export default function Composition() {
     setRevealed(false);
   };
 
-  // ★★★ 修正点 2：常に `goNextPrioritized` を呼ぶようにする ★★★
   const onNext = () => {
     goNextPrioritized();
+  };
+
+  const onManualNext = () => {
+    if (pairs.length === 0) return;
+    setIdx((prev) => {
+      const next = prev + 1;
+      return next >= pairs.length ? 0 : next;
+    });
+    setRevealed(false);
   };
 
   const onMark = async (kind: "correct" | "wrong") => {
@@ -519,7 +527,7 @@ export default function Composition() {
             revealed={revealed}
             setRevealed={setRevealed}
             onPrev={onPrev}
-            onNext={onNext}
+            onManualNext={onManualNext}
             onCorrect={() => void onMark("correct")}
             onWrong={() => void onMark("wrong")}
           />
@@ -573,7 +581,7 @@ function ContentSwitcher({
   revealed,
   setRevealed,
   onPrev,
-  onNext,
+  onManualNext,
   onCorrect,
   onWrong,
 }: {
@@ -587,7 +595,7 @@ function ContentSwitcher({
   revealed: boolean;
   setRevealed: (v: boolean) => void;
   onPrev: () => void;
-  onNext: () => void;
+  onManualNext: () => void;
   onCorrect: () => void;
   onWrong: () => void;
 }) {
@@ -602,7 +610,7 @@ function ContentSwitcher({
       revealed={revealed}
       setRevealed={setRevealed}
       onPrev={onPrev}
-      onNext={onNext}
+      onNext={onManualNext}
       stat={
         card
           ? stats[card.id] ?? { correct: 0, wrong: 0 }

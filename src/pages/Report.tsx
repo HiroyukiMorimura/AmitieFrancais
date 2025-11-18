@@ -802,7 +802,9 @@ export default function Report() {
               </div>
 
               <div className="rounded-xl border p-3 bg-white">
-                <h3 className="text-sm font-semibold">苦手な問題 Best 10</h3>
+                <h3 className="text-sm font-semibold">
+                  苦手な問題 Best 10（二回以上学習したもの）
+                </h3>
                 {nominoStats.filter((x) => (x.attempts ?? 0) >= 2).length ===
                 0 ? (
                   <p className="text-slate-600 text-sm mt-2">
@@ -884,7 +886,7 @@ export default function Report() {
               {/* 苦手な動詞 Best 10 */}
               <div className="rounded-xl border p-3 bg-white">
                 <h3 className="text-sm font-semibold">
-                  苦手な動詞 Best 10（attempts ≥ 2）
+                  苦手な動詞 Best 10（二回以上学習したもの）
                 </h3>
                 {hardestVerbs.length === 0 ? (
                   <p className="text-slate-600 text-sm mt-2">
@@ -957,7 +959,9 @@ export default function Report() {
 
               {/* 間違えた Best 3 */}
               <div className="rounded-xl border p-3 bg-white">
-                <h3 className="text-sm font-semibold">苦手な問題 Best 3</h3>
+                <h3 className="text-sm font-semibold">
+                  苦手な問題 Best 3（二回以上学習したもの）
+                </h3>
                 {hardestCompositions.length === 0 ? (
                   <p className="text-slate-600 text-sm mt-2">
                     該当データがありません。

@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "ingest": "tsx scripts/ingest.ts"
+    "ingest": "tsx scripts/ingest.ts",
+    "test:verbe": "playwright test tests/verbe.spec.ts",
+    "test:verbe:ui": "playwright test tests/verbe.spec.ts --ui"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.2",
@@ -31,6 +33,7 @@
     "globals": "^16.3.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.12",
+    "@playwright/test": "^1.48.2",
     "tsx": "^4.20.5",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",

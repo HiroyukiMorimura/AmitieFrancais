@@ -655,14 +655,18 @@ export default function NewsVocab() {
     setIdx((v) => Math.max(0, v - 1));
     setRevealed(false);
   };
-  const onNext = () => {
-    if (idx < pairs.length - 1) {
-      pushRecent(pairs[idx]?.id ?? null);
-      setIdx((v) => v + 1);
-      setRevealed(false);
-    } else {
-      goNextPrioritized();
-    }
+  const onManualNext = () => {
+    if (pairs.length === 0) return;
+    pushRecent(pairs[idx]?.id ?? null);
+    setIdx((prev) => {
+      const next = prev + 1;
+      return next >= pairs.length ? 0 : next;
+    });
+    setRevealed(false);
+  };
+
+  const onAutoNext = () => {
+    goNextPrioritized();
   };
 
   // 正解/不正の記録（書き込みは snake）
@@ -716,7 +720,7 @@ export default function NewsVocab() {
     setRevealed,
     onCorrect: () => void mark("correct"),
     onWrong: () => void mark("wrong"),
-    onNext,
+    onNext: onAutoNext,
     onPrev,
   });
   // 進捗保存（UI モジュールは kebab）
@@ -941,7 +945,7 @@ export default function NewsVocab() {
               revealed={revealed}
               setRevealed={setRevealed}
               onPrev={onPrev}
-              onNext={onNext}
+              onNext={onManualNext}
               dir={dir}
               stat={
                 card
@@ -1082,9 +1086,8 @@ function DrillView({
           </button>
 
           <button
-            className="rounded-xl border px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-40"
+            className="rounded-xl border px-4 py-2 text-sm hover:bg-slate-50"
             onClick={onNext}
-            disabled={idx >= total - 1}
           >
             次へ →
           </button>

@@ -365,14 +365,18 @@ export default function NominalisationsGym() {
     setIdx((v) => Math.max(0, v - 1));
     setRevealed(false);
   };
-  const onNext = () => {
-    if (idx < pairs.length - 1) {
-      pushRecent(pairs[idx]?.id ?? null);
-      setIdx((v) => v + 1);
-      setRevealed(false);
-    } else {
-      goNextPrioritized();
-    }
+  const onManualNext = () => {
+    if (pairs.length === 0) return;
+    pushRecent(pairs[idx]?.id ?? null);
+    setIdx((prev) => {
+      const next = prev + 1;
+      return next >= pairs.length ? 0 : next;
+    });
+    setRevealed(false);
+  };
+
+  const onAutoNext = () => {
+    goNextPrioritized();
   };
 
   const onMark = async (kind: "correct" | "wrong") => {
@@ -437,7 +441,7 @@ export default function NominalisationsGym() {
     setRevealed,
     onCorrect: () => void onMark("correct"),
     onWrong: () => void onMark("wrong"),
-    onNext,
+    onNext: onAutoNext,
     onPrev,
   });
   return (
@@ -529,7 +533,7 @@ export default function NominalisationsGym() {
               revealed={revealed}
               setRevealed={setRevealed}
               onPrev={onPrev}
-              onNext={onNext}
+              onNext={onManualNext}
               onCorrect={() => void onMark("correct")}
               onWrong={() => void onMark("wrong")}
             />
@@ -793,9 +797,8 @@ function DrillView({
           </button>
 
           <button
-            className="rounded-xl border px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-40"
+            className="rounded-xl border px-4 py-2 text-sm hover:bg-slate-50"
             onClick={onNext}
-            disabled={idx >= total - 1}
           >
             次へ →
           </button>

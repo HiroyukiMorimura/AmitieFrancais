@@ -120,9 +120,9 @@ async function loadAll(
     if (hasHeader) {
       const rawId = iId !== -1 ? cols[iId]?.trim() : undefined;
       const n = rawId ? Number(rawId) : NaN;
-      id = Number.isFinite(n) ? n : 1_000_000 + lineIdx;
+      id = Number.isFinite(n) ? n : 1_000_000 + (lineIdx + 1);
     } else {
-      id = 1_000_000 + lineIdx;
+      id = 1_000_000 + (lineIdx + 1);
     }
     out.push({ id, ja, fr });
   });

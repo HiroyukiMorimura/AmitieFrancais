@@ -23,6 +23,12 @@ paths.forEach((p, i) => {
   pathById.set(id, p);
 });
 
+export const LOCAL_PAIR_BLOCK = 100_000;
+
+export function makeLocalPairId(topicId: number, rowIndex: number) {
+  return topicId * LOCAL_PAIR_BLOCK - (rowIndex + 1);
+}
+
 // === ヘルパ ===
 function extractSubtopicHeader(firstLine: string): string {
   const m = firstLine.match(/「(.+?)」/);
@@ -104,7 +110,12 @@ export async function loadLocalPairs(topicId: number): Promise<LocalPair[]> {
   const pairs: LocalPair[] = [];
   for (const [i, line] of lines.entries()) {
     const p = splitJaFr(line);
-    if (p) pairs.push({ id: i + 1, ja: p.ja, fr: p.fr });
+    if (p)
+      pairs.push({
+        id: makeLocalPairId(topicId, i),
+        ja: p.ja,
+        fr: p.fr,
+      });
   }
   return pairs;
 }

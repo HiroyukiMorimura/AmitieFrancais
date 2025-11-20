@@ -687,12 +687,16 @@ export default function NewsVocab() {
     });
 
     try {
+      const skillTags: string[] = [];
+      if (selectedTopicId != null) skillTags.push(`topic:${selectedTopicId}`);
+      skillTags.push(`dir:${dir}`);
+
       await recordAttemptSrv({
         menuId: MENU_ID_SNAKE, // "news_vocab"
         isCorrect: kind === "correct",
         itemId: card.id,
-        skillTags: [],
-        meta: { dir },
+        skillTags,
+        meta: { dir, topic_id: selectedTopicId ?? undefined },
         alsoLocal: {
           userId: uid ?? "local",
           localSkillTags: [

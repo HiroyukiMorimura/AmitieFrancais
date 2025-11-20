@@ -3,7 +3,12 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { getDailyStudySeconds } from "../lib/supaMetrics";
-import { isLocalTopicId, loadLocalPairs } from "../lib/localNewsSets";
+import {
+  isLocalTopicId,
+  loadLocalPairs,
+  makeLocalPairId,
+  LOCAL_PAIR_BLOCK,
+} from "../lib/localNewsSets";
 import { listLocalTopics } from "../lib/localNewsSets";
 
 /* ========== 型 ========== */
@@ -28,6 +33,8 @@ type StudyBucket = {
 // 汎用Agg
 type Agg = { attempts: number; corrects: number; wrongs: number };
 
+type DrillDir = "JA2FR" | "FR2JA";
+
 /* ========== ①（既存）時事単語の統計 ========== */
 
 async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
@@ -36,12 +43,17 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
     Date.now() - SINCE_DAYS * 86400 * 1000
   ).toISOString();
 
-  type AttemptRow = { item_id: number | null; is_correct: boolean };
+  type AttemptRow = {
+    item_id: number | null;
+    is_correct: boolean;
+    meta?: { dir?: DrillDir } | null;
+    skill_tags?: string[] | null;
+  };
   let rowsAttempt: AttemptRow[] = [];
 
   const tryWithCreated = await supabase
     .from("attempts")
-    .select("item_id,is_correct,created_at,menu_id")
+    .select("item_id,is_correct,created_at,menu_id,meta,skill_tags")
     .eq("user_id", uid)
     .in("menu_id", ["news_vocab", "news-vocab"])
     .not("item_id", "is", null)
@@ -52,7 +64,7 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
   } else {
     const fallback = await supabase
       .from("attempts")
-      .select("item_id,is_correct,menu_id")
+      .select("item_id,is_correct,menu_id,meta,skill_tags")
       .eq("user_id", uid)
       .in("menu_id", ["news_vocab", "news-vocab"])
       .not("item_id", "is", null);
@@ -62,13 +74,53 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
   const rows = rowsAttempt;
   if (!rows || rows.length === 0) return [];
 
+  const resolveDir = (row: AttemptRow): DrillDir => {
+    const metaDir = row.meta?.dir;
+    if (metaDir === "FR2JA") return "FR2JA";
+    if (metaDir === "JA2FR") return "JA2FR";
+    const tagDir = row.skill_tags?.find((tag) => tag.startsWith("dir:"));
+    if (tagDir === "dir:FR2JA") return "FR2JA";
+    if (tagDir === "dir:JA2FR") return "JA2FR";
+    return "JA2FR";
+  };
+
+  const resolveTopicId = (row: AttemptRow): number | null => {
+    const tag = row.skill_tags?.find((t) => t.startsWith("topic:"));
+    if (!tag) return null;
+    const raw = Number(tag.slice("topic:".length));
+    return Number.isFinite(raw) ? raw : null;
+  };
+
   const aggMap = new Map<
-    number,
-    { attempts: number; corrects: number; wrongs: number }
+    string,
+    {
+      itemId: number;
+      dir: DrillDir;
+      attempts: number;
+      corrects: number;
+      wrongs: number;
+    }
   >();
+  const itemIds = new Set<number>();
   for (const r of rows) {
     if (r.item_id == null) continue;
-    const cur = aggMap.get(r.item_id) ?? {
+    const topicId = resolveTopicId(r);
+    let itemId = Number(r.item_id);
+    if (Number.isNaN(itemId)) continue;
+    if (
+      topicId != null &&
+      Number.isFinite(topicId) &&
+      isLocalTopicId(topicId) &&
+      itemId > -LOCAL_PAIR_BLOCK
+    ) {
+      const legacyIdx = Math.max(0, itemId - 1);
+      itemId = makeLocalPairId(topicId, legacyIdx);
+    }
+    const dir = resolveDir(r);
+    const key = `${itemId}:${dir}`;
+    const cur = aggMap.get(key) ?? {
+      itemId,
+      dir,
       attempts: 0,
       corrects: 0,
       wrongs: 0,
@@ -76,42 +128,93 @@ async function fetchNewsVocabStats(uid: string): Promise<VocabStat[]> {
     cur.attempts += 1;
     if (r.is_correct) cur.corrects += 1;
     else cur.wrongs += 1;
-    aggMap.set(r.item_id, cur);
+    aggMap.set(key, cur);
+    itemIds.add(itemId);
   }
-  const itemIds = [...aggMap.keys()];
-  if (itemIds.length === 0) return [];
+  const itemIdList = [...itemIds];
+  if (itemIdList.length === 0) return [];
 
   // ラベル解決（ローカルニュースセットから）
-  const labelMap = new Map<number, string>();
-  const unresolved = new Set(itemIds);
+  const labelMap = new Map<
+    number,
+    { ja?: string | null; fr?: string | null }
+  >();
+  const unresolved = new Set(itemIdList);
   const locals = listLocalTopics();
   for (const t of locals) {
     if (!isLocalTopicId(t.id)) continue;
     const pairs = await loadLocalPairs(t.id);
     for (const p of pairs) {
       if (unresolved.has(p.id)) {
-        labelMap.set(p.id, `${p.ja} — ${p.fr}`);
+        labelMap.set(p.id, { ja: p.ja, fr: p.fr });
         unresolved.delete(p.id);
       }
     }
     if (unresolved.size === 0) break;
   }
 
-  const stats: VocabStat[] = itemIds.map((id) => {
-    const a = aggMap.get(id)!;
-    const acc = a.attempts ? Math.round((a.corrects / a.attempts) * 100) : 0;
+  // ローカルで解決できなかった ID は Supabase の vocab_pairs から取得
+  if (unresolved.size > 0) {
+    const unresolvedIds = [...unresolved];
+    const chunkSize = 100;
+    for (let idx = 0; idx < unresolvedIds.length; idx += chunkSize) {
+      const chunk = unresolvedIds.slice(idx, idx + chunkSize);
+      const { data, error } = await supabase
+        .from("vocab_pairs")
+        .select("id, ja, fr")
+        .in("id", chunk);
+      if (error || !data) continue;
+      for (const row of data as {
+        id: number;
+        ja: string | null;
+        fr: string | null;
+      }[]) {
+        labelMap.set(row.id, { ja: row.ja, fr: row.fr });
+        unresolved.delete(row.id);
+      }
+      if (unresolved.size === 0) break;
+    }
+  }
+
+  const makeWord = (
+    entry: { itemId: number; dir: DrillDir },
+    label?: { ja?: string | null; fr?: string | null }
+  ) => {
+    const ja = label?.ja?.trim();
+    const fr = label?.fr?.trim();
+    if (entry.dir === "FR2JA") {
+      if (fr && ja) return `${fr} — ${ja}`;
+      if (fr) return fr;
+      if (ja) return ja;
+    } else {
+      if (ja && fr) return `${ja} — ${fr}`;
+      if (ja) return ja;
+      if (fr) return fr;
+    }
+    return null;
+  };
+
+  const stats: VocabStat[] = [...aggMap.values()].map((entry) => {
+    const acc = entry.attempts
+      ? Math.round((entry.corrects / entry.attempts) * 100)
+      : 0;
+    const label = labelMap.get(entry.itemId);
     return {
       user_id: uid,
-      word: labelMap.get(id) ?? null,
-      lemma: null,
-      attempts: a.attempts,
-      corrects: a.corrects,
-      wrongs: a.wrongs,
+      word: makeWord(entry, label),
+      lemma: entry.dir === "FR2JA" ? "仏→日" : "日→仏",
+      attempts: entry.attempts,
+      corrects: entry.corrects,
+      wrongs: entry.wrongs,
       accuracy_percent: acc,
     };
   });
 
-  return stats.sort((x, y) => x.accuracy_percent - y.accuracy_percent);
+  return stats.sort((x, y) =>
+    x.accuracy_percent !== y.accuracy_percent
+      ? x.accuracy_percent - y.accuracy_percent
+      : (y.attempts ?? 0) - (x.attempts ?? 0)
+  );
 }
 
 /* ========== 共通：attempts から任意メニューの集計 ========== */
@@ -295,7 +398,7 @@ async function loadVerbePart(cat: VerbeCategory, part: number) {
   const fname =
     cat === "normal"
       ? `verbesNormalesList-${part}.tsv`
-      : `verbesPronominauxList-${part}.tsv`;
+      : `verbesProminauxList-${part}.tsv`; // Verbe.tsx と同じ綴り
   const url = new URL(`../data/verbe/${fname}`, import.meta.url).toString();
   try {
     const t = await fetch(url).then((r) => {
@@ -308,65 +411,105 @@ async function loadVerbePart(cat: VerbeCategory, part: number) {
       fr: p.fr,
     }));
   } catch {
-    if (cat === "refl") {
-      // fallback: Prominaux 綴り
-      const alt = `verbesProminauxList-${part}.tsv`;
-      const url2 = new URL(`../data/verbe/${alt}`, import.meta.url).toString();
-      try {
-        const t2 = await fetch(url2).then((r) => {
-          if (!r.ok) throw new Error(`TSV load failed: ${alt}`);
-          return r.text();
-        });
-        return parseVerbeTsv(t2).map((p, idx) => ({
-          id: verbeStableId(cat, part, idx),
-          ja: p.ja,
-          fr: p.fr,
-        }));
-      } catch {
-        return [];
-      }
-    }
     return [];
   }
 }
 
-async function resolveVerbeLabels(ids: number[]): Promise<Map<number, string>> {
+type VerbeLabel = { jaFr: string; frJa: string };
+
+async function resolveVerbeLabels(
+  ids: number[]
+): Promise<Map<number, VerbeLabel>> {
   const need = new Set(ids);
-  const m = new Map<number, string>();
+  const m = new Map<number, VerbeLabel>();
   for (const cat of ["normal", "refl"] as VerbeCategory[]) {
     for (const part of VERBE_PARTS[cat]) {
       const pairs = await loadVerbePart(cat, part);
       for (const p of pairs) {
         if (need.has(p.id)) {
-          m.set(p.id, `${p.ja} — ${p.fr}`);
+          m.set(p.id, {
+            jaFr: `${p.ja} — ${p.fr}`,
+            frJa: `${p.fr} — ${p.ja}`,
+          });
           need.delete(p.id);
         }
       }
       if (need.size === 0) return m;
     }
   }
-  for (const id of need) m.set(id, `#${id}`);
+  for (const id of need) m.set(id, { jaFr: `#${id}`, frJa: `#${id}` });
   return m;
 }
 
 async function fetchVerbeStats(uid: string): Promise<VocabStat[]> {
-  // menu_id は 'verbe'（snake/kebab同形）を想定
-  const agg = await fetchAggFromAttempts(uid, ["verbe", "verbe"]);
+  type AttemptRow = {
+    item_id: number | string | null;
+    is_correct: boolean;
+    meta?: { dir?: DrillDir };
+  };
+  const { data, error } = await supabase
+    .from("attempts")
+    .select("item_id,is_correct,meta")
+    .eq("user_id", uid)
+    .eq("menu_id", "verbe")
+    .not("item_id", "is", null);
+  if (error || !data) return [];
+
+  const agg = new Map<
+    string,
+    {
+      itemId: number;
+      dir: DrillDir;
+      attempts: number;
+      corrects: number;
+      wrongs: number;
+    }
+  >();
+  const itemIds = new Set<number>();
+
+  (data as AttemptRow[]).forEach((row) => {
+    if (row.item_id == null) return;
+    const numericId = Number(row.item_id);
+    if (Number.isNaN(numericId)) return;
+    const dir =
+      (row.meta as { dir?: DrillDir } | null)?.dir === "FR2JA"
+        ? "FR2JA"
+        : "JA2FR";
+    const key = `${numericId}:${dir}`;
+    const cur = agg.get(key) ?? {
+      itemId: numericId,
+      dir,
+      attempts: 0,
+      corrects: 0,
+      wrongs: 0,
+    };
+    cur.attempts += 1;
+    if (row.is_correct) cur.corrects += 1;
+    else cur.wrongs += 1;
+    agg.set(key, cur);
+    itemIds.add(numericId);
+  });
+
   if (agg.size === 0) return [];
 
-  const ids = [...agg.keys()];
-  const labels = await resolveVerbeLabels(ids);
+  const labels = await resolveVerbeLabels([...itemIds]);
 
-  const rows: VocabStat[] = ids.map((id) => {
-    const a = agg.get(id)!;
-    const acc = a.attempts ? Math.round((a.corrects / a.attempts) * 100) : 0;
+  const rows: VocabStat[] = [...agg.values()].map((entry) => {
+    const label = labels.get(entry.itemId);
+    const word =
+      entry.dir === "FR2JA"
+        ? label?.frJa ?? `#${entry.itemId}`
+        : label?.jaFr ?? `#${entry.itemId}`;
+    const acc = entry.attempts
+      ? Math.round((entry.corrects / entry.attempts) * 100)
+      : 0;
     return {
       user_id: uid,
-      word: labels.get(id) ?? `#${id}`,
-      lemma: null,
-      attempts: a.attempts,
-      corrects: a.corrects,
-      wrongs: a.wrongs,
+      word,
+      lemma: entry.dir === "FR2JA" ? "仏→日" : "日→仏",
+      attempts: entry.attempts,
+      corrects: entry.corrects,
+      wrongs: entry.wrongs,
       accuracy_percent: acc,
     };
   });
@@ -617,11 +760,14 @@ export default function Report() {
     [compStats]
   );
 
+  const vocabHasLabel = (x: VocabStat) => Boolean(x.word && x.word.trim());
+
   /* ====== 苦手な単語/動詞 Best 10（attempts >= 2） ====== */
   const hardestWords = useMemo(
     () =>
       vocabStats
         .filter((x) => (x.attempts ?? 0) >= 2)
+        .filter((x) => vocabHasLabel(x))
         .sort((a, b) =>
           a.accuracy_percent !== b.accuracy_percent
             ? a.accuracy_percent - b.accuracy_percent
@@ -711,6 +857,7 @@ export default function Report() {
 
               <div className="rounded-xl border p-3 bg-white">
                 <h3 className="text-sm font-semibold">苦手な単語 Best 10</h3>
+
                 {hardestWords.length === 0 ? (
                   <p className="text-slate-600 text-sm mt-2">
                     データがありません。

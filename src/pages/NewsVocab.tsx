@@ -49,60 +49,38 @@ type DirStat = { JA2FR: Stat; FR2JA: Stat };
 
 /** kebab / snake の両方を読み、ID ごとに合算して返す（any を使わない版） */
 async function fetchCountsMerged(itemIds: number[]) {
-  const add = (a?: Stat, b?: Stat): Stat => ({
-    correct: (a?.correct ?? 0) + (b?.correct ?? 0),
-    wrong: (a?.wrong ?? 0) + (b?.wrong ?? 0),
-  });
-
-  // kebab は UIModuleId にそのまま入る
-  const kebabMap = await getCountsForItemsSrv(UI_MODULE_ID, itemIds).catch(
-    () => new Map<number, Stat>()
-  );
-
-  // snake は型に含まれないので unknown → UIModuleId に二段キャスト
-  const SNAKE_AS_UI = MENU_ID_SNAKE as unknown as UIModuleId;
-  const snakeMap = await getCountsForItemsSrv(SNAKE_AS_UI, itemIds).catch(
-    () => new Map<number, Stat>()
-  );
-
-  const merged = new Map<number, Stat>();
-  for (const id of itemIds) {
-    merged.set(id, add(kebabMap.get(id), snakeMap.get(id)));
+  try {
+    return await getCountsForItemsSrv(UI_MODULE_ID, itemIds);
+  } catch {
+    return new Map<number, Stat>();
   }
-  return merged;
 }
 
 /** kebab / snake の両方を読み、方向別（JA2FR/FR2JA）で合算して返す */
 async function fetchCountsByDirMerged(itemIds: number[], uid: string) {
-  const add = (a?: Stat, b?: Stat): Stat => ({
-    correct: (a?.correct ?? 0) + (b?.correct ?? 0),
-    wrong: (a?.wrong ?? 0) + (b?.wrong ?? 0),
-  });
-
-  const SNAKE_AS_UI = MENU_ID_SNAKE as unknown as UIModuleId;
-
-  const fetchOneSrv = async (moduleId: UIModuleId, dir: DrillDir) => {
+  const fetchOneSrv = async (dir: DrillDir) => {
     try {
-      return await getCountsForItemsByDirSrv(moduleId, itemIds, dir);
+      return await getCountsForItemsByDirSrv(UI_MODULE_ID, itemIds, dir);
     } catch {
       return new Map<number, Stat>();
     }
   };
 
-  // 1) まず既存サーバ集計（kebab/snake × 2方向）
-  const [kJA, kFR, sJA, sFR] = await Promise.all([
-    fetchOneSrv(UI_MODULE_ID, "JA2FR"),
-    fetchOneSrv(UI_MODULE_ID, "FR2JA"),
-    fetchOneSrv(SNAKE_AS_UI, "JA2FR"),
-    fetchOneSrv(SNAKE_AS_UI, "FR2JA"),
+  // 1) まず既存サーバ集計（UIモジュール ID のみ。supaMetrics 側で snake/kebab を吸収）
+  const [kJA, kFR] = await Promise.all([
+    fetchOneSrv("JA2FR"),
+    fetchOneSrv("FR2JA"),
   ]);
 
   const mergedSrv = new Map<number, DirStat>();
   for (const id of itemIds) {
-    const ja = add(kJA.get(id), sJA.get(id));
-    const fr = add(kFR.get(id), sFR.get(id));
-    if (ja.correct || ja.wrong || fr.correct || fr.wrong) {
-      mergedSrv.set(id, { JA2FR: ja, FR2JA: fr });
+    const ja = kJA.get(id);
+    const fr = kFR.get(id);
+    if (ja || fr) {
+      mergedSrv.set(id, {
+        JA2FR: ja ?? { correct: 0, wrong: 0 },
+        FR2JA: fr ?? { correct: 0, wrong: 0 },
+      });
     }
   }
   if (mergedSrv.size > 0) return mergedSrv;
@@ -686,6 +664,11 @@ export default function NewsVocab() {
       return { ...prev, [card.id]: { ...cur, [dir]: updated } };
     });
 
+    setSessionIncrement((prev) => ({
+      correct: prev.correct + (kind === "correct" ? 1 : 0),
+      tried: prev.tried + 1,
+    }));
+
     try {
       const skillTags: string[] = [];
       if (selectedTopicId != null) skillTags.push(`topic:${selectedTopicId}`);
@@ -745,6 +728,10 @@ export default function NewsVocab() {
     correct: 0,
     tried: 0,
   });
+  const [sessionIncrement, setSessionIncrement] = useState<{
+    correct: number;
+    tried: number;
+  }>({ correct: 0, tried: 0 });
   useEffect(() => {
     if (!uid) {
       setSessionTotal({ correct: 0, tried: 0 });
@@ -767,17 +754,9 @@ export default function NewsVocab() {
     })();
   }, [uid]);
 
-  // 今セッションで増えた分（画面での操作ぶん）
-  const sessionIncrement = useMemo(() => {
-    let correct = 0;
-    let tried = 0;
-    for (const s of Object.values(stats)) {
-      correct += s.JA2FR.correct + s.FR2JA.correct;
-      tried +=
-        s.JA2FR.correct + s.JA2FR.wrong + s.FR2JA.correct + s.FR2JA.wrong;
-    }
-    return { correct, tried };
-  }, [stats]);
+  useEffect(() => {
+    setSessionIncrement({ correct: 0, tried: 0 });
+  }, [uid]);
 
   const totalCorrect = sessionTotal.correct + sessionIncrement.correct;
   const totalTried = sessionTotal.tried + sessionIncrement.tried;

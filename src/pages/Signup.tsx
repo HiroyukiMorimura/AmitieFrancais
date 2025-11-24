@@ -1,15 +1,13 @@
 // src/pages/Signup.tsx
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
-import { useNavigate } from "react-router-dom";
 
 export default function Signup() {
-  const nav = useNavigate();
-
   // 入力状態
-  const [fullName, setFullName] = useState(""); // ← name を fullName に統一
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   // UI状態
   const [err, setErr] = useState<string | null>(null);
@@ -22,6 +20,10 @@ export default function Signup() {
     setOk(null);
     setLoading(true);
     try {
+      if (password !== confirmPassword) {
+        setErr("パスワードが一致しません");
+        return;
+      }
       // data は未使用なので error のみ参照
       const { error } = await supabase.auth.signUp({
         email,
@@ -35,9 +37,10 @@ export default function Signup() {
         setErr(error.message);
         return;
       }
-      setOk("登録しました。ログインしてください。");
-      // Confirm email を OFF にしていれば即ログイン可能なので /login へ
-      nav("/login");
+      setOk(
+        '登録しました。"Supabase Auth <noreply@mail.app.supabase.io>" から届くメールの "Confirm your mail" をクリックしてメール認証を完了してください。'
+      );
+      // メール確認が完了するまでログインできないため、自動遷移しない
     } finally {
       setLoading(false);
     }
@@ -96,6 +99,19 @@ export default function Signup() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-slate-600">
+                パスワード（確認）
+              </label>
+              <input
+                className="input"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 autoComplete="new-password"
                 required
               />

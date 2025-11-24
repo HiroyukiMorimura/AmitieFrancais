@@ -5,8 +5,8 @@ import { supabase } from "../lib/supabase";
 
 export default function Login() {
   const nav = useNavigate();
-  const [email, setEmail] = useState("demo@lingua.app");
-  const [password, setPassword] = useState("demo1234");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -52,10 +52,6 @@ export default function Login() {
           <h1 className="text-2xl font-bold text-slate-800 text-center">
             ログイン
           </h1>
-          <p className="mt-1 text-center text-slate-500 text-sm">
-            デモ用：<code>demo@lingua.app</code> / <code>demo1234</code>
-          </p>
-
           <div className="mt-5">
             <Link
               to="/signup"
@@ -80,9 +76,10 @@ export default function Login() {
                 メールアドレス
               </label>
               <input
-                className="input"
+                className="input bg-slate-50 placeholder:text-slate-400 placeholder:opacity-80"
                 type="email"
                 value={email}
+                placeholder="demo@lingua.app"
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="email"
               />
@@ -90,9 +87,10 @@ export default function Login() {
             <div>
               <label className="block text-sm text-slate-600">パスワード</label>
               <input
-                className="input"
+                className="input bg-slate-50 placeholder:text-slate-400 placeholder:opacity-80"
                 type="password"
                 value={password}
+                placeholder="demo1234"
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
               />

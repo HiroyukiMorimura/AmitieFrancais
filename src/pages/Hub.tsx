@@ -89,6 +89,13 @@ export default function Hub() {
     return <Navigate to="/login" replace />;
   }
 
+  const metadataName = user.user_metadata?.full_name;
+  const hasMetadataName =
+    typeof metadataName === "string" && metadataName.trim().length > 0;
+  const displayName =
+    (hasMetadataName ? metadataName.trim() : user.email?.split("@")[0]) ??
+    "ゲスト";
+
   const StatBadge = ({
     label,
     value,
@@ -242,10 +249,7 @@ export default function Hub() {
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold">
-                Bonjour,{" "}
-                <span className="text-rose-600">
-                  {user.email?.split("@")[0] ?? "ゲスト"}
-                </span>
+                Bonjour, <span className="text-rose-600">{displayName}</span>
                 さん
               </h1>
               <p className="mt-1 text-slate-600">

@@ -1,4 +1,3 @@
-// src/pages/Hub.tsx
 import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { getModuleAccuracy, getDailyStudySeconds } from "../lib/supaMetrics";
@@ -80,8 +79,10 @@ export default function Hub() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-svh">
-        <p className="text-slate-600">ログイン情報を読み込み中…</p>
+      <div className="flex items-center justify-center min-h-svh bg-rose-50/50">
+        <p className="text-rose-400 font-medium animate-pulse">
+          読み込んでいます... 🌸
+        </p>
       </div>
     );
   }
@@ -100,27 +101,38 @@ export default function Hub() {
     label,
     value,
     emoji,
+    color = "rose",
   }: {
     label: string;
     value: string | number;
     emoji?: string;
-  }) => (
-    <div className="rounded-2xl border bg-white/70 backdrop-blur p-3 shadow-sm hover:shadow transition">
-      <div className="text-xs text-slate-500">
-        {emoji ? `${emoji} ${label}` : label}
+    color?: "rose" | "sky" | "violet" | "amber";
+  }) => {
+    const colorStyles = {
+      rose: "bg-rose-50 text-rose-600 border-rose-100",
+      sky: "bg-sky-50 text-sky-600 border-sky-100",
+      violet: "bg-violet-50 text-violet-600 border-violet-100",
+      amber: "bg-amber-50 text-amber-600 border-amber-100",
+    };
+
+    return (
+      <div
+        className={`flex flex-col items-center justify-center rounded-2xl border p-3 shadow-sm transition hover:scale-105 hover:shadow-md ${colorStyles[color]}`}
+      >
+        <div className="text-2xl mb-1">{emoji}</div>
+        <div className="text-xs font-medium opacity-80">{label}</div>
+        <div className="text-lg font-bold">{value}</div>
       </div>
-      <div className="mt-1 text-lg font-semibold">{value}</div>
-    </div>
-  );
+    );
+  };
 
   const Card = (props: {
     title: string;
     desc: string;
     to: string;
-    stat?: Stat; // 受け取るが未使用（互換のため残す）
+    stat?: Stat;
     emoji: string;
-    image?: string; // /images/xxx.jpg のルート相対パス
-    hue?: "rose" | "violet" | "emerald" | "amber";
+    hue?: "rose" | "violet" | "emerald" | "amber" | "sky";
     disabled?: boolean;
   }) => {
     const {
@@ -128,67 +140,84 @@ export default function Hub() {
       desc,
       to,
       emoji,
-      image,
       hue = "rose",
       disabled = false,
     } = props;
 
-    const ring =
-      hue === "rose"
-        ? `ring-rose-200 ${disabled ? "" : "hover:ring-rose-300"}`
-        : hue === "violet"
-        ? `ring-violet-200 ${disabled ? "" : "hover:ring-violet-300"}`
-        : hue === "emerald"
-        ? `ring-emerald-200 ${disabled ? "" : "hover:ring-emerald-300"}`
-        : `ring-amber-200 ${disabled ? "" : "hover:ring-amber-300"}`;
+    // パステルカラー定義
+    const styles = {
+      rose: {
+        bg: "bg-gradient-to-br from-rose-50 to-white",
+        border: "border-rose-100",
+        text: "text-rose-600",
+        ring: "hover:ring-rose-200",
+        shadow: "shadow-rose-100",
+        btn: "bg-rose-100 text-rose-700 hover:bg-rose-200",
+      },
+      violet: {
+        bg: "bg-gradient-to-br from-violet-50 to-white",
+        border: "border-violet-100",
+        text: "text-violet-600",
+        ring: "hover:ring-violet-200",
+        shadow: "shadow-violet-100",
+        btn: "bg-violet-100 text-violet-700 hover:bg-violet-200",
+      },
+      emerald: {
+        bg: "bg-gradient-to-br from-emerald-50 to-white",
+        border: "border-emerald-100",
+        text: "text-emerald-600",
+        ring: "hover:ring-emerald-200",
+        shadow: "shadow-emerald-100",
+        btn: "bg-emerald-100 text-emerald-700 hover:bg-emerald-200",
+      },
+      amber: {
+        bg: "bg-gradient-to-br from-amber-50 to-white",
+        border: "border-amber-100",
+        text: "text-amber-600",
+        ring: "hover:ring-amber-200",
+        shadow: "shadow-amber-100",
+        btn: "bg-amber-100 text-amber-700 hover:bg-amber-200",
+      },
+      sky: {
+        bg: "bg-gradient-to-br from-sky-50 to-white",
+        border: "border-sky-100",
+        text: "text-sky-600",
+        ring: "hover:ring-sky-200",
+        shadow: "shadow-sky-100",
+        btn: "bg-sky-100 text-sky-700 hover:bg-sky-200",
+      },
+    };
 
-    const lift = disabled ? "" : "hover:-translate-y-0.5";
+    const s = styles[hue];
+    const lift = disabled ? "" : "hover:-translate-y-1 hover:shadow-lg";
 
     return (
       <div
-        className={`relative flex flex-col justify-end overflow-hidden rounded-3xl border shadow-sm ring-1 ${ring} p-0 ${lift}`}
-        style={{ minHeight: "220px" }}
+        className={`group relative flex flex-col items-center text-center rounded-[2rem] border ${s.border} ${s.bg} p-6 shadow-sm transition-all duration-300 ${lift} ${s.ring} ring-1 ring-transparent`}
       >
-        {/* 背景画像（軽い拡大／ぼかし無し） */}
-        {image && (
-          <img
-            src={image}
-            alt={title}
-            className="absolute inset-0 h-full w-full object-cover scale-105"
-            loading="lazy"
-            decoding="async"
-          />
-        )}
-        {/* 明るめオーバーレイ（文字を邪魔しない） */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/20 via-white/10 to-transparent" />
+        {/* ふわふわ浮かぶ絵文字 */}
+        <div className="mb-4 text-6xl drop-shadow-sm transition-transform duration-500 ease-in-out group-hover:scale-110 animate-float">
+          {emoji}
+        </div>
 
-        {/* 前面コンテンツ（中央揃え・タイトルやや上寄せ） */}
-        <div className="relative z-10 p-4 text-center mb-6">
-          <div className="inline-flex items-center gap-2 rounded-xl bg-white/80 backdrop-blur-sm px-2.5 py-1 mx-auto">
-            <span className="text-base">{emoji}</span>
-            <h3 className="font-semibold">{title}</h3>
-            {disabled && <span className="ml-2 chip text-xs">準備中</span>}
-          </div>
-          <p className="mt-2 max-w-[90%] rounded-xl bg-white/75 px-3 py-2 text-sm text-slate-700 backdrop-blur-sm mx-auto">
-            {desc}
-          </p>
-          <div className="mt-4 flex justify-center">
-            {disabled ? (
-              <span
-                className="btn-primary px-6 py-2 pointer-events-none select-none"
-                aria-disabled="true"
-                role="button"
-                tabIndex={-1}
-                title="準備中です"
-              >
-                準備中
-              </span>
-            ) : (
-              <Link to={to} className="btn-primary px-6 py-2">
-                はじめる <span aria-hidden>→</span>
-              </Link>
-            )}
-          </div>
+        <h3 className={`mb-2 text-lg font-bold ${s.text}`}>{title}</h3>
+        <p className="mb-6 text-sm text-slate-600 leading-relaxed">{desc}</p>
+
+        <div className="mt-auto">
+          {disabled ? (
+            <span
+              className="inline-block rounded-full bg-slate-100 px-6 py-2 text-sm text-slate-400 select-none"
+            >
+              準備中... 💤
+            </span>
+          ) : (
+            <Link
+              to={to}
+              className={`inline-flex items-center justify-center rounded-full px-8 py-2.5 text-sm font-bold transition-colors ${s.btn}`}
+            >
+              はじめる
+            </Link>
+          )}
         </div>
       </div>
     );
@@ -209,126 +238,120 @@ export default function Hub() {
   const studyStreak = computeStreak(studyBuckets);
 
   return (
-    <div className="relative min-h-svh bg-gradient-to-br from-sky-50 via-white to-rose-50">
-      {/* 背景装飾 */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -top-24 -left-16 h-72 w-72 rounded-full bg-rose-200/30 blur-3xl" />
-        <div className="absolute top-32 -right-10 h-72 w-72 rounded-full bg-violet-200/30 blur-3xl" />
-        <div className="absolute bottom-0 left-1/3 h-56 w-56 rounded-full bg-emerald-100/40 blur-3xl" />
+    <div className="relative min-h-svh bg-[#fffafb] font-sans text-slate-700 overflow-x-hidden">
+      {/* カスタムアニメーション定義 */}
+      <style>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-10px); }
+        }
+        .animate-float {
+          animation: float 3s ease-in-out infinite;
+        }
+      `}</style>
+
+      {/* 背景装飾（パステル） */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -top-[20%] -left-[10%] h-[70vh] w-[70vh] rounded-full bg-rose-100/40 blur-3xl opacity-60 mix-blend-multiply" />
+        <div className="absolute top-[10%] -right-[10%] h-[60vh] w-[60vh] rounded-full bg-sky-100/40 blur-3xl opacity-60 mix-blend-multiply" />
+        <div className="absolute -bottom-[20%] left-[20%] h-[60vh] w-[60vh] rounded-full bg-amber-100/40 blur-3xl opacity-60 mix-blend-multiply" />
       </div>
 
       {/* ヘッダー */}
-      <header className="relative z-10 bg-white/70 backdrop-blur border-b">
-        <div className="mx-auto max-w-screen-xl px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-xl bg-rose-500 text-white grid place-items-center shadow">
-              ✨
+      <header className="relative z-10">
+        <div className="mx-auto max-w-screen-xl px-6 py-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-rose-300 to-rose-400 text-white shadow-md">
+              <span className="text-xl">✨</span>
             </div>
-            <div className="font-bold">アミティエ フランス語学習アプリ</div>
+            <div className="font-bold text-slate-700 tracking-wide">Amitié</div>
           </div>
-          <div className="flex items-center gap-2 text-sm">
-            <Link to="/app/report" className="chip">
+          <div className="flex items-center gap-3 text-sm font-medium">
+            <Link
+              to="/app/report"
+              className="hidden sm:inline-flex items-center gap-1 rounded-full bg-white/60 px-4 py-1.5 text-slate-600 hover:bg-white hover:text-rose-500 transition shadow-sm"
+            >
               📄 レポート
             </Link>
-            <Link to="/app/study-time" className="chip">
-              ⏱ 学習時間
-            </Link>
-            <span className="hidden sm:inline text-slate-600">
-              {user.email}
-            </span>
-            <button className="chip" onClick={logout}>
+            <button
+              onClick={logout}
+              className="rounded-full bg-white/60 px-4 py-1.5 text-slate-600 hover:bg-white hover:text-rose-500 transition shadow-sm"
+            >
               ログアウト
             </button>
           </div>
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto max-w-screen-xl px-4 py-8">
+      <main className="relative z-10 mx-auto max-w-screen-xl px-6 pb-20">
         {/* ヒーロー部 */}
-        <section className="rounded-3xl border bg-white/70 backdrop-blur p-6 shadow-sm">
-          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-bold">
-                Bonjour, <span className="text-rose-600">{displayName}</span>
-                さん
-              </h1>
-              <p className="mt-1 text-slate-600">
-                まちがいは宝物。弱点を拾い上げて、得意に変えていこう ✨
-              </p>
-            </div>
+        <section className="mt-4 mb-12 text-center">
+          <h1 className="text-3xl md:text-4xl font-bold text-slate-800 mb-3">
+            Bonjour, <span className="text-rose-400">{displayName}</span>!
+          </h1>
+          <p className="text-slate-500 mb-10">
+            今日も楽しくフランス語に触れましょう 🇫🇷
+          </p>
 
-            {/* ★ 新しい4指標（全期間） */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 min-w-[260px]">
-              <StatBadge
-                label="勉強時間（全期間）"
-                value={`${totalStudyHours}時間 ${totalStudyMinutes}分`}
-                emoji="⏱"
-              />
-              <StatBadge
-                label="勉強日数（全期間）"
-                value={studyDays}
-                emoji="📅"
-              />
-              <StatBadge label="連続勉強日数" value={studyStreak} emoji="🔥" />
-              <StatBadge label="総正答" value={totalCorrect} emoji="✅" />
-            </div>
+          {/* 統計バッジ */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto">
+            <StatBadge
+              label="勉強時間"
+              value={`${totalStudyHours}h ${totalStudyMinutes}m`}
+              emoji="⏱️"
+              color="sky"
+            />
+            <StatBadge
+              label="勉強日数"
+              value={`${studyDays}日`}
+              emoji="📅"
+              color="rose"
+            />
+            <StatBadge
+              label="連続日数"
+              value={`${studyStreak}日`}
+              emoji="🔥"
+              color="amber"
+            />
+            <StatBadge
+              label="総正答数"
+              value={`${totalCorrect}問`}
+              emoji="✅"
+              color="violet"
+            />
           </div>
         </section>
 
         {/* メニュー */}
-        <h2 className="mt-8 mb-3 text-lg font-semibold">学習メニュー</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <Card
             emoji="📰"
-            title="① 時事単語ドリル"
-            desc="ニュース頻出語をカードで学習"
+            title="時事単語"
+            desc="ニュースに出てくる言葉をチェック！"
             to="/app/news-vocab"
-            stat={mod["news-vocab"]}
             hue="rose"
-            image="/images/vocab.jpg"
-            disabled={false}
           />
           <Card
             emoji="✍️"
-            title="② 名詞化ドリル"
-            desc="よりハイレベルなフランス語を書く基礎固め"
+            title="名詞化"
+            desc="スマートな文章を書くための第一歩"
             to="/app/nominalisation"
-            stat={mod["nominalisation"]}
             hue="violet"
-            image="/images/nominalisation.jpg"
-            disabled={false}
           />
           <Card
-            emoji="🔤"
-            title="③ 動詞ドリル"
-            desc="会話にも重要な動詞を徹底的に学ぶ"
+            emoji="🗣️"
+            title="動詞ジム"
+            desc="会話の瞬発力を鍛えるトレーニング"
             to="/app/temps"
-            stat={mod["verb-gym"]}
             hue="emerald"
-            image="/images/verbe.jpg"
-            disabled={false}
           />
           <Card
             emoji="📝"
-            title="④ 仏作文"
-            desc="日常会話で書けそうで書けない文章の特訓"
+            title="仏作文"
+            desc="言いたいことをフランス語にする練習"
             to="/app/composition"
-            stat={mod["composition"]}
             hue="amber"
-            image="/images/composition.jpg"
-            disabled={false}
           />
-          {/* 将来のメニュー
-          <Card
-            emoji="📚"
-            title="⑤ 仏検過去問"
-            desc="過去問ドリルで実戦力アップ"
-            to="/app/futsuken"
-            stat={mod["futsuken"]}
-            hue="rose"
-            image="/images/futsuken.jpg"
-            disabled={true}
-          /> */}
         </div>
       </main>
     </div>

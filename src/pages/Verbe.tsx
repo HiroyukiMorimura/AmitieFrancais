@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import type { UIModuleId, MenuId } from "../lib/metricsClient";
 
@@ -210,9 +210,12 @@ export default function Verbe() {
   // ドリル状態
   const [idx, setIdx] = useState(0);
   const [revealed, setRevealed] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
   // 方向別のインメモリ正誤
   const [stats, setStats] = useState<Record<number, DirStat>>({});
+  // セッション内での増分（表示用）
+  const [sessionDelta, setSessionDelta] = useState({ correct: 0, wrong: 0 });
 
   // 直近抑制
   const recentRef = useRef<number[]>([]);
@@ -236,7 +239,11 @@ export default function Verbe() {
     setIdx(-1);
     setRevealed(false);
     clearRecent();
+    clearRecent();
     setLoadingPairs(true);
+    // パート変更時はセッション増分はリセットしない（セッション全体での累計なので）
+    // ただし、もし「パートごとの正答数」を表示したいならリセットすべきだが、
+    // ヘッダーの表示は「Verbe（動詞ドリル）」全体の累計と思われるため維持する。
   }, [cat, part]);
 
   // グループ変更時に読み込み
@@ -440,6 +447,9 @@ export default function Verbe() {
     }
 
     if (!card) return;
+    if (processing) return;
+
+    setProcessing(true);
 
     setStats((prev) => {
       const cur = prev[card.id] ?? zeroDirStat();
@@ -450,6 +460,11 @@ export default function Verbe() {
           : { correct: curDir.correct, wrong: curDir.wrong + 1 };
       return { ...prev, [card.id]: { ...cur, [dir]: updated } };
     });
+
+    setSessionDelta((prev) => ({
+      correct: prev.correct + (kind === "correct" ? 1 : 0),
+      wrong: prev.wrong + (kind === "wrong" ? 1 : 0),
+    }));
 
     try {
       await recordAttemptSrv({
@@ -477,6 +492,7 @@ export default function Verbe() {
       console.warn("[recordAttempt] failed", e);
     }
     goNextPrioritized();
+    setProcessing(false);
   };
 
   // 進捗保存（UI モジュールは kebab）
@@ -519,25 +535,21 @@ export default function Verbe() {
   }, [uid]);
 
   // 今セッションで増えた分（UI内）
-  const sessionIncrement = useMemo(() => {
-    let correct = 0;
-    let tried = 0;
-    for (const s of Object.values(stats)) {
-      correct += s.JA2FR.correct + s.FR2JA.correct;
-      tried +=
-        s.JA2FR.correct + s.JA2FR.wrong + s.FR2JA.correct + s.FR2JA.wrong;
-    }
-    return { correct, tried };
-  }, [stats]);
+  // const sessionIncrement = ... (削除: stats を集計すると過去分も含まれてしまうため)
 
-  const totalCorrect = sessionTotal.correct + sessionIncrement.correct;
-  const totalTried = sessionTotal.tried + sessionIncrement.tried;
+  const totalCorrect = sessionTotal.correct + sessionDelta.correct;
+  const totalTried =
+    sessionTotal.tried + sessionDelta.correct + sessionDelta.wrong;
   const acc = totalTried ? Math.round((totalCorrect / totalTried) * 100) : 0;
 
   // ホットキー
   useDrillHotkeys({
     enabled:
-      part !== null && mode === "drill" && !loadingPairs && pairs.length > 0,
+      part !== null &&
+      mode === "drill" &&
+      !loadingPairs &&
+      pairs.length > 0 &&
+      !processing,
     revealed,
     setRevealed,
     onCorrect: () => void mark("correct"),
@@ -546,9 +558,7 @@ export default function Verbe() {
     onPrev,
   });
 
-  const filePath = part
-    ? `/src/data/verbe/${buildFileName(cat, part)}`
-    : "(未選択)";
+
 
   return (
     <div className="min-h-svh bg-white">
@@ -680,7 +690,7 @@ export default function Verbe() {
                   ? `${CAT_LABEL[cat]} — ${PART_LABEL(cat, part)}`
                   : `${CAT_LABEL[cat]} — （パートを選択してください）`}
               </div>
-              <div className="text-xs text-slate-500">{filePath}</div>
+
               <div className="text-xs text-slate-500">
                 語彙数：{loadingPairs ? "…" : pairs.length} 件
               </div>
@@ -712,7 +722,7 @@ export default function Verbe() {
                 }
                 onCorrect={() => void mark("correct")}
                 onWrong={() => void mark("wrong")}
-                disabled={!uid} // 認証中（uid未取得）はボタンを無効化
+                disabled={!uid || processing} // 認証中（uid未取得）または処理中はボタンを無効化
               />
             )
           ) : (

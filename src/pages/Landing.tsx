@@ -11,7 +11,7 @@ export default function Landing() {
 
   return (
     // 全体の背景にログインページと同じ写真を敷きつつ、可読性確保のため薄いオーバーレイを重ねる
-    <div className="relative min-h-svh w-full text-stone-700 overflow-hidden">
+    <div className="relative min-h-svh w-full text-stone-700 overflow-hidden font-sans">
       <img
         src="/images/app_icon.jpg"
         onError={(e) => {
@@ -21,23 +21,23 @@ export default function Landing() {
         alt=""
         className="pointer-events-none select-none fixed inset-0 h-full w-full object-cover -z-20"
       />
-      <div className="fixed inset-0 bg-white/55 backdrop-blur-sm -z-10" />
+      <div className="fixed inset-0 bg-rose-50/90 backdrop-blur-sm -z-10" />
       {/* --- 背景の装飾（オーロラグラデーション） --- */}
       {/* 最先端感を出すための、ぼんやりとした光の表現 */}
-      <div className="pointer-events-none absolute top-[-10%] left-[-20%] w-[70vw] h-[70vw] rounded-full bg-rose-200/40 blur-[120px] mix-blend-multiply animate-blob filter z-0" />
-      <div className="pointer-events-none absolute top-[20%] right-[-20%] w-[60vw] h-[60vw] rounded-full bg-purple-200/40 blur-[120px] mix-blend-multiply animate-blob animation-delay-2000 filter z-0" />
-      <div className="pointer-events-none absolute bottom-[-20%] left-[20%] w-[60vw] h-[60vw] rounded-full bg-orange-100/40 blur-[120px] mix-blend-multiply animate-blob animation-delay-4000 filter z-0" />
+      <div className="pointer-events-none absolute top-[-10%] left-[-20%] w-[70vw] h-[70vw] rounded-full bg-pink-200/60 blur-[100px] mix-blend-multiply animate-blob filter z-0" />
+      <div className="pointer-events-none absolute top-[20%] right-[-20%] w-[60vw] h-[60vw] rounded-full bg-purple-200/60 blur-[100px] mix-blend-multiply animate-blob animation-delay-2000 filter z-0" />
+      <div className="pointer-events-none absolute bottom-[-20%] left-[20%] w-[60vw] h-[60vw] rounded-full bg-orange-100/60 blur-[100px] mix-blend-multiply animate-blob animation-delay-4000 filter z-0" />
 
       {/* ヘッダー */}
       {/* 背景の透明度を上げ、境界線を柔らかくして浮遊感を出す */}
-      <header className="fixed top-0 left-0 z-50 w-full border-b border-white/40 bg-white/30 backdrop-blur-md supports-[backdrop-filter]:bg-white/10">
+      <header className="fixed top-0 left-0 z-50 w-full border-b border-white/60 bg-white/60 backdrop-blur-md supports-[backdrop-filter]:bg-white/40 shadow-sm shadow-rose-100/50">
         <div className="w-full max-w-screen-xl mx-auto px-[clamp(16px,4vw,64px)] py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             {/* ロゴアイコンを少しリッチに */}
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-rose-400 to-pink-600 text-white grid place-items-center shadow-lg shadow-rose-200/50">
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-rose-300 to-pink-400 text-white grid place-items-center shadow-lg shadow-rose-200">
               <span className="text-lg">✨</span>
             </div>
-            <span className="text-lg font-bold tracking-tight text-stone-800">
+            <span className="text-lg font-bold tracking-tight text-stone-600">
               アミティエ{" "}
               <span className="hidden sm:inline">フランス語学習アプリ</span>
             </span>
@@ -55,16 +55,16 @@ export default function Landing() {
         <div className="w-full max-w-screen-xl mx-auto px-[clamp(16px,4vw,64px)] py-12 md:py-20 grid lg:grid-cols-12 gap-[clamp(32px,6vw,80px)] items-center">
           {/* 左側：テキストコンテンツ (lg:col-span-7) */}
           <div className="text-center lg:text-left lg:col-span-7">
-            <h1 className="font-extrabold text-[clamp(32px,5vw,56px)] leading-[1.1] tracking-tight text-stone-900">
+            <h1 className="font-extrabold text-[clamp(32px,5vw,56px)] leading-[1.1] tracking-tight text-stone-800 drop-shadow-sm">
               フランス語学習、
               <br />
-              <span className="bg-gradient-to-r from-rose-500 via-pink-500 to-purple-500 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-rose-400 via-pink-400 to-purple-400 bg-clip-text text-transparent">
                 もっと自由に、
                 <br />
                 心地よく。
               </span>
             </h1>
-            <p className="mt-6 text-lg text-stone-600 max-w-2xl mx-auto lg:mx-0 leading-relaxed">
+            <p className="mt-6 text-lg text-stone-600 max-w-2xl mx-auto lg:mx-0 leading-relaxed font-medium">
               毎日の「ちょっとだけ」を応援します。
               <br className="hidden sm:block" />
               ちょっとずつ単語を覚え、目標に近づいていきましょう。
@@ -74,7 +74,7 @@ export default function Landing() {
             <div className="mt-10 flex flex-col sm:flex-row justify-center lg:justify-start gap-4">
               <Link
                 to="/login"
-                className="group relative inline-flex items-center justify-center px-8 py-4 font-bold text-white transition-all bg-gradient-to-r from-rose-500 to-pink-600 rounded-full shadow-xl shadow-rose-300/30 hover:shadow-rose-300/50 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500"
+                className="group relative inline-flex items-center justify-center px-8 py-4 font-bold text-white transition-all bg-gradient-to-r from-rose-400 to-pink-500 rounded-full shadow-xl shadow-rose-200 hover:shadow-rose-300 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-400"
               >
                 アプリを始める
                 <svg

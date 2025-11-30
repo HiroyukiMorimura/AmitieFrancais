@@ -103,7 +103,7 @@ export default function Landing() {
               {/* メインのカード：少し傾けて浮遊感を出す */}
               <div className="relative w-full aspect-[4/5] rounded-[32px] overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.15)] border-[6px] border-white bg-white transform rotate-[-2deg] hover:rotate-0 transition-all duration-500 ease-out">
                 <img
-                  src="/images/tomoko.jpg"
+                  src="/images/tomoko_sensei.jpg"
                   onError={(e) => {
                     const img = e.currentTarget as HTMLImageElement;
                     img.src =

@@ -5,9 +5,8 @@ source	nominal	ja	note
 **se lamenter** (v.)	la lamentation	嘆き	
 **bavard** (adj.)	le bavardage	おしゃべり	
 **paresseux** (adj.)	la paresse	怠惰	
-**assembler** (v.)	l'assemblée	集会	
-**créer** (v.)	la création	創造	
-**énorme** (adj.)	l'énormité	巨大さ	
+**assembler** (v.)	l'assemblage	組み立て	
+**créer** (v.)	la création	創造		
 **annoncer** (v.)	l'annonce	お知らせ、告知	
 **gentil** (adj.)	la gentillesse	優しさ	
 **perdre** (v.)	la perte	損失	
@@ -33,7 +32,7 @@ source	nominal	ja	note
 **voir** (v.)	la vue	視界	
 **audacieux** (adj.)	l'audace	大胆さ	
 **perforer** (v.)	la perforation	穴あけ	
-**se récrier** (v.)	la protestation	抗議の叫び	
+**protester** (v.)	la protestation	抗議の叫び	
 **agoniser** (v.)	l'agonie	臨終の苦しみ	
 **exécuter** (v.)	l'exécution	実行、処刑	
 **pieux** (adj.)	la piété	信仰心	
@@ -72,8 +71,7 @@ source	nominal	ja	note
 **se souvenir** (v.)	le souvenir	思い出、記憶	
 **sauver** (v.)	le sauvetage	救助	
 **fatigué** (adj.)	la fatigue	疲れ	
-**lisse** (adj.)	la lissité	滑らかさ	
-**traîner** (v.)	la traîne	（ドレスの）裾	
+**lisse** (adj.)	la lissité	滑らかさ
 **se douter** (v.)	le doute	疑い	
 **injurier** (v.)	l'injure	侮辱	
 **se soumettre** (v.)	la soumission	服従	
@@ -92,7 +90,7 @@ source	nominal	ja	note
 **remplacer** (v.)	le remplacement	交換	
 **nager** (v.)	la nage	泳ぎ	
 **se régaler** (v.)	le régal	ごちそう	
-**rouler** (v.)	le roulage	圧延	
+**rouler** (v.)	le roulement（回転・ローリング）/ la roulade（でんぐり返し）/ le rouleau（ローラー、巻物）
 **minimiser** (v.)	la minimisation	最小化	
 **tailler** (v.)	la taille	サイズ、裁断	
 **dépenser** (v.)	la dépense	支出	

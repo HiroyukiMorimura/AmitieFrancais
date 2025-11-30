@@ -14,7 +14,7 @@ import {
 import { useDrillHotkeys } from "../hooks/useDrillHotkeys";
 
 /* =========================================================
-    Verbe（動詞ドリル）: 日本語⇄フランス語
+    Verbe（動詞ジム）: 日本語⇄フランス語
     データ:
       - 通常動詞:  /src/data/verbe/verbesNormalesList-1..5.tsv
       - 再帰動詞:  /src/data/verbe/verbesProminauxList-1..2.tsv
@@ -565,7 +565,7 @@ export default function Verbe() {
       {/* ヘッダー */}
       <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
         <div className="mx-auto max-w-5xl px-4 py-3 flex flex-wrap gap-3 items-center justify-between">
-          <h1 className="text-lg font-bold">🔤 Verbe（動詞ドリル）</h1>
+          <h1 className="text-lg font-bold">🔤 Verbe（動詞ジム）</h1>
           <div className="flex items-center gap-3 text-sm text-slate-600">
             <span>
               正答 {totalCorrect} / {totalTried}（{acc}%）

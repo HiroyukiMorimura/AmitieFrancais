@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "ingest": "tsx scripts/ingest.ts",
+    "create-demo-user": "tsx scripts/create-demo-user.ts",
     "test:verbe": "playwright test tests/verbe.spec.ts",
     "test:verbe:ui": "playwright test tests/verbe.spec.ts --ui"
   },

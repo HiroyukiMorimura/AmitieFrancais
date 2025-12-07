@@ -5,8 +5,8 @@ import { supabase } from "../lib/supabase";
 
 export default function Login() {
   const nav = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("demo@lingua.app");
+  const [password, setPassword] = useState("demo1234");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 

@@ -10,6 +10,7 @@ import {
   getCountsForItems as getCountsForItemsSrv,
 } from "../lib/metricsClient";
 import { useDrillHotkeys } from "../hooks/useDrillHotkeys";
+import { useTextToSpeech } from "../hooks/useTextToSpeech";
 
 /* =========================================================
     仏作文ドリル（JA → FR）
@@ -678,6 +679,15 @@ function DrillView({
   onCorrect: () => void;
   onWrong: () => void;
 }) {
+  // 音声読み上げ機能（Hooksは条件分岐の前に呼び出す必要がある）
+  const { speak, isSupported } = useTextToSpeech({ lang: "fr-FR" });
+
+  const handleSpeak = () => {
+    if (card && isSupported) {
+      speak(card.fr);
+    }
+  };
+
   if (!card)
     return <div className="mt-6 text-slate-500">カードがありません</div>;
 
@@ -703,7 +713,32 @@ function DrillView({
             </button>
           ) : (
             <>
-              <div className="mt-4 text-xl text-slate-700">{answer}</div>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <div className="text-xl text-slate-700">{answer}</div>
+                {isSupported && (
+                  <button
+                    onClick={handleSpeak}
+                    className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-slate-100 transition-colors"
+                    title="音声で聞く"
+                    aria-label="音声で聞く"
+                  >
+                    <svg
+                      className="w-5 h-5 text-slate-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
+                      />
+                    </svg>
+                  </button>
+                )}
+              </div>
               <div className="mt-5 flex items-center justify-center gap-2">
                 <button
                   className="rounded-xl border px-4 py-2 text-sm hover:bg-green-50"

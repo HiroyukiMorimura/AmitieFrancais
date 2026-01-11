@@ -128,36 +128,28 @@ async function loadGroup(cat: Category, part: number): Promise<Pair[]> {
 }
 
 /* ------------------ サーバ集計（kebab+snake 合算） ------------------ */
-async function fetchCountsByDirMerged(
+/* ------------------ サーバ集計 ------------------ */
+async function fetchCountsByDir(
   itemIds: number[]
 ): Promise<Map<number, DirStat>> {
-  const add = (a?: Stat, b?: Stat): Stat => ({
-    correct: (a?.correct ?? 0) + (b?.correct ?? 0),
-    wrong: (a?.wrong ?? 0) + (b?.wrong ?? 0),
-  });
+  // UI_AS_UI ("verbe") を指定すれば、supaMetrics 側で snake_case ("verbe") も含めて合算されるため
+  // ここで手動マージする必要はない。
+  // 以前は snake と kebab を別々に fetch して足し合わせていたが、
+  // IDが同一 ("verbe") のためダブルカウントになっていた問題を修正。
 
-  const SNAKE_AS_UI = MENU_ID_SNAKE as unknown as UIModuleId;
-
-  const [kJA, kFR, sJA, sFR] = await Promise.all([
-    getCountsForItemsByDirSrv(UI_AS_UI, itemIds, "JA2FR").catch(
-      () => new Map<number, Stat>()
-    ),
-    getCountsForItemsByDirSrv(UI_AS_UI, itemIds, "FR2JA").catch(
-      () => new Map<number, Stat>()
-    ),
-    getCountsForItemsByDirSrv(SNAKE_AS_UI, itemIds, "JA2FR").catch(
-      () => new Map<number, Stat>()
-    ),
-    getCountsForItemsByDirSrv(SNAKE_AS_UI, itemIds, "FR2JA").catch(
-      () => new Map<number, Stat>()
-    ),
-  ]);
+  const res = await getCountsForItemsByDirSrv(UI_AS_UI, itemIds, "JA2FR").catch(
+    () => new Map<number, Stat>()
+  );
+  const res2 = await getCountsForItemsByDirSrv(UI_AS_UI, itemIds, "FR2JA").catch(
+    () => new Map<number, Stat>()
+  );
 
   const merged = new Map<number, DirStat>();
   for (const id of itemIds) {
-    const ja = add(kJA.get(id), sJA.get(id));
-    const fr = add(kFR.get(id), sFR.get(id));
-    merged.set(id, { JA2FR: ja, FR2JA: fr });
+    merged.set(id, {
+      JA2FR: res.get(id) ?? { correct: 0, wrong: 0 },
+      FR2JA: res2.get(id) ?? { correct: 0, wrong: 0 },
+    });
   }
   return merged;
 }
@@ -255,9 +247,9 @@ export default function Verbe() {
         const limited = data.slice(0, LIMIT_PAIRS);
         setPairs(limited);
 
-        // サーバの方向別カウント復元（kebab+snake 合算）
+        // サーバの方向別カウント復元
         const itemIds = limited.map((p) => p.id);
-        const srv = await fetchCountsByDirMerged(itemIds).catch(
+        const srv = await fetchCountsByDir(itemIds).catch(
           () => new Map<number, DirStat>()
         );
         const next: Record<number, DirStat> = {};

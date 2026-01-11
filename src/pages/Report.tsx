@@ -8,8 +8,8 @@ import {
   loadLocalPairs,
   makeLocalPairId,
   LOCAL_PAIR_BLOCK,
+  listLocalTopics,
 } from "../lib/localNewsSets";
-import { listLocalTopics } from "../lib/localNewsSets";
 
 /* ========== 型 ========== */
 

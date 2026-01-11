@@ -478,15 +478,7 @@ export default function Verbe() {
           `dir:${dir}`,
         ],
         meta: { cat, part, dir },
-        alsoLocal: {
-          userId: uid, // この時点で uid は null ではない
-          localSkillTags: [
-            "vocab:verbe",
-            `cat:${cat}`,
-            `part:${part ?? "?"}`,
-            `dir:${dir}`,
-          ],
-        },
+        userId: uid,
       });
     } catch (e) {
       console.warn("[recordAttempt] failed", e);

@@ -445,10 +445,7 @@ export default function Composition() {
         itemId: card.id,
         skillTags: ["composition"],
         meta: { dir: "JA2FR" },
-        alsoLocal: {
-          userId: uid, // 'local' ではなく 'uid' を渡す
-          localSkillTags: ["vocab:composition", "dir:JA2FR"],
-        },
+        userId: uid,
       });
     } catch (e) {
       console.warn("[composition] recordAttempt failed", e);

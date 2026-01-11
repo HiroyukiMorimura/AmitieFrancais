@@ -1,12 +1,9 @@
 // src/lib/metricsClient.ts
 
-import type { LocalModuleId } from "./metrics";
-import { recordAttempt as recordAttemptLocal } from "./metrics";
-
 import {
   startSession as startSessionSrv,
   endSession as endSessionSrv,
-  recordAttempt as recordAttemptSrv, // supaMetrics.recordAttempt
+  recordAttempt as recordAttemptSrv,
   saveProgress as saveProgressSrv,
   loadProgress as loadProgressSrv,
   getItemStatsByDir as getItemStatsByDirSrv,
@@ -21,20 +18,16 @@ export type MenuId =
   | "verbe"
   | "composition";
 
-/** ローカル（metrics.ts）側のモジュールID = kebab-case */
-export type KebabId = LocalModuleId; // "news-vocab" | "nominalisation" | "verb-gym" | "freewrite" | "futsuken"
+/** UI で使うID（kebab-case） */
+export type UIModuleId =
+  | "news-vocab"
+  | "nominalisation"
+  | "verbe"
+  | "composition"
+  | "futsuken";
 
-/** UI で使うID（= kebab のエイリアス） */
-export type UIModuleId = KebabId;
-
-/** snake → kebab のマッピング（ローカル保存の既定に使用） */
-const SNAKE_TO_KEBAB: Record<MenuId, KebabId> = {
-  news_vocab: "news-vocab",
-  futsuken: "futsuken",
-  nominalisation: "nominalisation",
-  verbe: "verbe",
-  composition: "composition",
-};
+/** kebab-case のエイリアス */
+export type KebabId = UIModuleId;
 
 /* =========================================================
  * 1) セッション時間
@@ -48,60 +41,37 @@ export function endSession(menu: MenuId, sessionStartMs: number | null) {
 }
 
 /* =========================================================
- * 2) 正誤イベント（サーバー保存 + 任意でローカル保存）
+ * 2) 正誤イベント（サーバー保存のみ）
  * =======================================================*/
 type RecordAttemptArgs = {
-  /** サーバー保存用（必須 / snake_case） */ menuId: MenuId;
+  /** サーバー保存用（必須 / snake_case） */
+  menuId: MenuId;
   isCorrect: boolean;
   itemId?: number;
   skillTags?: string[];
-  meta?: Record<
-    string,
-    unknown
-  > /** ついでのローカル保存（任意 / kebab-case） */;
-
-  alsoLocal?: {
-    userId: string; // 未ログインなら "local" 等
-    localModuleId?: KebabId; // 省略時は snake→kebab 変換
-    localSkillTags?: string[];
-  };
+  meta?: Record<string, unknown>;
+  /** ユーザーID（必須） */
+  userId: string;
 };
 
-/** サーバー → attempts に記録、必要ならローカルにも鏡写し保存 */
+/** サーバー → attempts に記録 */
 export async function recordAttempt(args: RecordAttemptArgs): Promise<void> {
-  // ★★★ 修正点: alsoLocal から uid を取得 ★★★
-  const uid = args.alsoLocal?.userId;
+  const uid = args.userId;
 
-  // ★★★ 修正点: uid が "local" や null/undefined の場合はサーバー保存をスキップ ★★★
+  // ログインしているユーザーのみサーバー保存
   if (uid && uid !== "local") {
-    // 1) サーバー保存（supaMetrics.recordAttempt を使用）
     await recordAttemptSrv({
-      uid: uid, // ★★★ 修正点: uid を supaMetrics に渡す ★★★
-      menuId: args.menuId, // snake_case
+      uid: uid,
+      menuId: args.menuId,
       itemId: args.itemId ?? 0,
       isCorrect: args.isCorrect,
       skillTags: args.skillTags,
       meta: args.meta,
     });
-  } else if (!uid || uid === "local") {
-    // ログイン前に押された場合など（ローカル保存のみ行われる）
+  } else {
     console.warn(
       "[recordAttempt] uid is 'local' or missing. Skipping server save."
     );
-  }
-
-  // 2) ローカル保存（任意）
-  if (args.alsoLocal) {
-    const moduleId: KebabId =
-      args.alsoLocal.localModuleId ?? SNAKE_TO_KEBAB[args.menuId];
-
-    recordAttemptLocal({
-      userId: args.alsoLocal.userId, // ここは "local" でもOK
-      moduleId, // kebab-case
-      correct: args.isCorrect,
-      skillTags: args.alsoLocal.localSkillTags ?? [],
-      meta: args.itemId != null ? { itemId: args.itemId } : undefined,
-    });
   }
 }
 

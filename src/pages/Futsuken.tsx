@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useAuth } from "../hooks/useAuth";
 import {
   startSession,
   endSession,
@@ -17,6 +18,9 @@ type Item = {
 type Stat = { correct: number; wrong: number };
 
 export default function Futsuken() {
+  const { user } = useAuth();
+  const uid = user?.id ?? null;
+  
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -170,9 +174,10 @@ export default function Futsuken() {
       await recordAttempt({
         menuId: "futsuken",
         isCorrect: ok,
-        itemId: item.id, // 将来DB化時は futsuken_items.id を入れる
-        skillTags: [], // 例: ["exam:futsuken:lexique"]
+        itemId: item.id,
+        skillTags: [],
         meta: { prompt: item.prompt },
+        userId: uid ?? "local",
       });
     } catch (e) {
       console.warn("[recordAttempt] futsuken failed:", e);

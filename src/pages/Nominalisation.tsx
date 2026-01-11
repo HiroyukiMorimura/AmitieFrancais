@@ -397,13 +397,7 @@ export default function NominalisationsGym() {
         itemId: card.id,
         skillTags: ["nominalisation"],
         meta: { dir: "BASE2NOM" },
-        alsoLocal: {
-          userId: uid ?? "local",
-          localSkillTags: [
-            "vocab:nominalisation",
-            `part:${selectedPart ?? "?"}`,
-          ],
-        },
+        userId: uid ?? "local",
       });
     } catch (e) {
       console.warn("[recordAttempt] failed", e);

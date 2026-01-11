@@ -19,6 +19,7 @@ import {
   loadLocalPairs,
 } from "../lib/localNewsSets";
 
+
 import { useDrillHotkeys } from "../hooks/useDrillHotkeys";
 
 const WEAK_TOPIC_ID = -1 as const;
@@ -680,14 +681,7 @@ export default function NewsVocab() {
         itemId: card.id,
         skillTags,
         meta: { dir, topic_id: selectedTopicId ?? undefined },
-        alsoLocal: {
-          userId: uid ?? "local",
-          localSkillTags: [
-            "vocab:news",
-            `topic:${selectedTopicId ?? "?"}`,
-            `dir:${dir}`,
-          ],
-        },
+        userId: uid ?? "local",
       });
     } catch (e) {
       console.warn("[recordAttempt] failed:", e);

@@ -24,8 +24,9 @@ export default function Signup() {
         setErr("パスワードが一致しません");
         return;
       }
-      // data は未使用なので error のみ参照
-      const { error } = await supabase.auth.signUp({
+      
+      // サインアップを試行
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -33,10 +34,27 @@ export default function Signup() {
           data: { full_name: fullName },
         },
       });
-      if (error) {
-        setErr(error.message);
+      
+      // Supabaseの設定によっては、既存ユーザーの場合でもエラーを返さない
+      // data.user が存在するが identities が空の場合、既に登録済み
+      if (data.user && (!data.user.identities || data.user.identities.length === 0)) {
+        setErr("そのメールアドレスは登録されています");
         return;
       }
+      
+      if (error) {
+        // エラーメッセージが "User already registered" の場合は日本語に変換
+        if (error.message.includes("already registered") || 
+            error.message.includes("already exists") ||
+            error.message.includes("already been registered") ||
+            error.message.includes("User already exists")) {
+          setErr("そのメールアドレスは登録されています");
+        } else {
+          setErr(error.message);
+        }
+        return;
+      }
+      
       setOk(
         '登録しました。"Supabase Auth <noreply@mail.app.supabase.io>" から届くメールの "Confirm your mail" をクリックしてメール認証を完了してください。'
       );

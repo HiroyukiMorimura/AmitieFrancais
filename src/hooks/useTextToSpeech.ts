@@ -48,3 +48,4 @@ export function useTextToSpeech(options: UseTextToSpeechOptions = {}) {
 
   return { speak, stop, isSupported };
 }
+

@@ -5,8 +5,8 @@ import { supabase } from "../lib/supabase";
 
 export default function Login() {
   const nav = useNavigate();
-  const [email, setEmail] = useState("demo@lingua.app");
-  const [password, setPassword] = useState("demo1234");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -79,7 +79,7 @@ export default function Login() {
                 className="input bg-slate-50 placeholder:text-slate-400 placeholder:opacity-80"
                 type="email"
                 value={email}
-                placeholder="demo@lingua.app"
+                placeholder=""
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="email"
               />
@@ -90,7 +90,7 @@ export default function Login() {
                 className="input bg-slate-50 placeholder:text-slate-400 placeholder:opacity-80"
                 type="password"
                 value={password}
-                placeholder="demo1234"
+                placeholder=""
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
               />

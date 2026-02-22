@@ -820,6 +820,13 @@ export default function Report() {
             >
               💾 HTML保存
             </button>
+            {/* ホームボタン */}
+            <Link
+              to="/app"
+              className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-100 transition-colors"
+            >
+              🏠 ホーム
+            </Link>
           </div>
         </div>
       </header>

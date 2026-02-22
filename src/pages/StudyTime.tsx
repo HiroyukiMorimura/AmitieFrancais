@@ -1,5 +1,6 @@
 /* eslint-disable no-console */
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
 type RangeKey = "14d" | "30d" | "90d";
@@ -81,9 +82,18 @@ export default function StudyTime() {
   return (
     <div className="min-h-svh bg-white">
       <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
-        <div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between">
+        <div className="mx-auto max-w-5xl px-4 py-3 flex flex-wrap gap-3 items-center justify-between">
           <h1 className="text-lg font-bold">⏱ 学習時間（{labelOf(range)}）</h1>
-          <RangeSwitch value={range} onChange={setRange} />
+          <div className="flex items-center gap-2">
+            <RangeSwitch value={range} onChange={setRange} />
+            {/* ホームボタン */}
+            <Link
+              to="/app"
+              className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-100 transition-colors"
+            >
+              🏠 ホーム
+            </Link>
+          </div>
         </div>
       </header>
 

@@ -264,7 +264,7 @@ export default function Hub() {
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-rose-300 to-rose-400 text-white shadow-md">
               <span className="text-xl">✨</span>
             </div>
-            <div className="font-bold text-slate-700 tracking-wide">アミティエ</div>
+            <div className="font-bold text-slate-700 tracking-wide">Amitié VocaGym</div>
           </div>
           <div className="flex items-center gap-3 text-sm font-medium">
             <Link

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import type { UIModuleId, MenuId } from "../lib/metricsClient";
 
@@ -58,6 +59,8 @@ export type Pair = {
   id: number; // ★ カテゴリ/パート由来の安定ID（衝突防止）
   ja: string;
   fr: string;
+  exFr?: string; // 例文（フランス語）
+  exJa?: string; // 例文（日本語）
 };
 
 export type Stat = { correct: number; wrong: number };
@@ -106,14 +109,21 @@ async function loadGroup(cat: Category, part: number): Promise<Pair[]> {
 
     let fr: string | undefined;
     let ja: string | undefined;
+    let exFr: string | undefined;
+    let exJa: string | undefined;
 
     if (hasHeader) {
       fr = cols[iFR]?.trim();
       ja = cols[iJA]?.trim();
+      // 例文は3列目・4列目（ヘッダありの場合はインデックスで取得）
+      exFr = cols[2]?.trim() || undefined;
+      exJa = cols[3]?.trim() || undefined;
     } else {
-      // ヘッダが無い場合は [fr, ja] 前提（今回のデータ作成方針に合わせる）
+      // ヘッダが無い場合は [fr, ja, exFr, exJa] 前提
       fr = cols[0]?.trim();
       ja = cols[1]?.trim();
+      exFr = cols[2]?.trim() || undefined;
+      exJa = cols[3]?.trim() || undefined;
     }
 
     if (!fr || !ja) return;
@@ -122,7 +132,7 @@ async function loadGroup(cat: Category, part: number): Promise<Pair[]> {
     const catCode = cat === "normal" ? 1 : 2;
     const id = catCode * 1_000_000 + part * 10_000 + (lineIdx + 1);
 
-    out.push({ id, fr, ja });
+    out.push({ id, fr, ja, exFr, exJa });
   });
   return out;
 }
@@ -549,14 +559,9 @@ export default function Verbe() {
       {/* ヘッダー */}
       <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
         <div className="mx-auto max-w-5xl px-4 py-3 flex flex-wrap gap-3 items-center justify-between">
-          <h1 className="text-lg font-bold">🔤 Verbe（動詞ジム）</h1>
-          <div className="flex items-center gap-3 text-sm text-slate-600">
-            <span>
-              正答 {totalCorrect} / {totalTried}（{acc}%）
-            </span>
-          </div>
+          <h1 className="text-lg font-bold">🔤 動詞ジム</h1>
 
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <div className="inline-flex rounded-xl border bg-white shadow-sm overflow-hidden">
               <button
                 className={`px-3 py-1.5 text-sm ${
@@ -610,6 +615,14 @@ export default function Verbe() {
                 </button>
               </div>
             )}
+
+            {/* ホームボタン */}
+            <Link
+              to="/app"
+              className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-100 transition-colors"
+            >
+              🏠 ホーム
+            </Link>
           </div>
         </div>
       </header>
@@ -678,6 +691,9 @@ export default function Verbe() {
               <div className="text-xs text-slate-500">
                 語彙数：{loadingPairs ? "…" : pairs.length} 件
               </div>
+            </div>
+            <div className="text-sm text-slate-600">
+              正答 {totalCorrect} / {totalTried}（{acc}%）
             </div>
           </div>
         </section>
@@ -750,6 +766,12 @@ function ListView({
           <li key={p.id} className="glass-card">
             <div className="font-medium">{p.ja}</div>
             <div className="text-slate-600">{p.fr}</div>
+            {p.exFr && (
+              <div className="mt-2 text-sm text-slate-500 border-l-2 border-slate-200 pl-2">
+                <div className="italic">{p.exFr}</div>
+                {p.exJa && <div className="text-xs text-slate-400">{p.exJa}</div>}
+              </div>
+            )}
             <div className="mt-1 text-xs text-slate-500">
               日→仏: ✅ {s.JA2FR.correct} / ❌ {s.JA2FR.wrong} 仏→日: ✅{" "}
               {s.FR2JA.correct} / ❌ {s.FR2JA.wrong}
@@ -822,6 +844,15 @@ function DrillView({
               <div className="mt-4 text-xl text-slate-700 whitespace-pre-wrap">
                 {answer}
               </div>
+              {card.exFr && (
+                <div className="mt-4 rounded-xl bg-slate-50 border border-slate-200 p-3 text-center">
+                  <div className="text-xs font-medium text-slate-400 mb-1">📖 例文</div>
+                  <div className="text-sm italic text-slate-600">{card.exFr}</div>
+                  {card.exJa && (
+                    <div className="text-xs text-slate-400 mt-1">{card.exJa}</div>
+                  )}
+                </div>
+              )}
               <div className="mt-5 flex items-center justify-center gap-2">
                 <button
                   className="rounded-xl border px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-40"

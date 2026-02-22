@@ -38,8 +38,7 @@ export default function Landing() {
               <span className="text-lg">✨</span>
             </div>
             <span className="text-lg font-bold tracking-tight text-stone-600">
-              アミティエ{" "}
-              <span className="hidden sm:inline">フランス語学習アプリ</span>
+              Amitié VocaGym
             </span>
           </div>
           {/* ナビゲーション（見た目だけ） */}
@@ -55,6 +54,17 @@ export default function Landing() {
         <div className="w-full max-w-screen-xl mx-auto px-[clamp(16px,4vw,64px)] py-12 md:py-20 grid lg:grid-cols-12 gap-[clamp(32px,6vw,80px)] items-center">
           {/* 左側：テキストコンテンツ (lg:col-span-7) */}
           <div className="text-center lg:text-left lg:col-span-7">
+            {/* 可愛い筆記体の名称表示 */}
+            <style>{`
+              @import url('https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&display=swap');
+            `}</style>
+            <div 
+              className="mb-4 text-[clamp(40px,5vw,64px)] text-rose-400 drop-shadow-md tracking-wider transform -rotate-3"
+              style={{ fontFamily: "'Dancing Script', cursive" }}
+            >
+              Amitié VocaGym
+            </div>
+            
             <h1 className="font-extrabold text-[clamp(32px,5vw,56px)] leading-[1.1] tracking-tight text-stone-800 drop-shadow-sm">
               フランス語学習、
               <br />
@@ -142,7 +152,7 @@ export default function Landing() {
       <footer className="relative z-10 w-full border-t border-stone-200/50 bg-white/30 backdrop-blur-md">
         <div className="mx-auto max-w-screen-xl px-4 py-8 text-xs text-stone-500 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="font-medium">
-            © {new Date().getFullYear()} Lingua Amies.
+            © {new Date().getFullYear()} Hiroyuki Morimura 
           </div>
           <div
             className="flex gap-6 pointer-events-none select-none opacity-60"

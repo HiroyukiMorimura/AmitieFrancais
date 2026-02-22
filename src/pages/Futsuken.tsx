@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import {
   startSession,
@@ -201,10 +202,12 @@ export default function Futsuken() {
       {/* ヘッダー */}
       <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
         <div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between">
-          <h1 className="text-lg font-bold">⑤ 仏検過去問</h1>
+          <h1 className="text-lg font-bold flex items-center gap-2">
+            <Link to="/app" className="text-rose-500 hover:text-rose-600" title="ホームに戻る">🏠</Link>
+            ⑤ 仏検過去問
+          </h1>
           <div className="text-sm text-slate-600">
-            正答 {totalCorrect} / {totalTried}（{acc}%）・問題数：
-            {loading ? "…" : total}
+            問題数：{loading ? "…" : total}
           </div>
         </div>
       </header>
@@ -218,6 +221,7 @@ export default function Futsuken() {
           <section className="mt-2">
             <div className="text-sm text-slate-500">
               {idx + 1} / {total}（正解 {stat.correct}・間違い {stat.wrong}）
+              ・正答 {totalCorrect} / {totalTried}（{acc}%）
             </div>
 
             <div className="mt-3 rounded-2xl border bg-white shadow p-6">

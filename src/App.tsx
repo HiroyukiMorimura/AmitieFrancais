@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Routes, Route, Link, useLocation } from "react-router-dom";
+import { Routes, Route } from "react-router-dom";
 import { supabase } from "./lib/supabase";
 
 import Landing from "./pages/Landing";
@@ -17,8 +17,6 @@ import Nominalisation from "./pages/Nominalisation";
 import Temps from "./pages/Verbe";
 
 export default function App() {
-  const location = useLocation();
-
   useEffect(() => {
     supabase.auth.getSession().then((res) => {
       console.log(
@@ -35,11 +33,6 @@ export default function App() {
       );
     });
   }, []);
-
-  // ホームボタンを非表示にするページ
-  const hideHomeButton = ["/", "/login", "/signup", "/app"].includes(
-    location.pathname
-  );
 
   return (
     <>
@@ -114,16 +107,6 @@ export default function App() {
           }
         />
       </Routes>
-
-      {/* 常に右下に固定表示する「ホーム」ボタン（特定のページでは非表示） */}
-      {!hideHomeButton && (
-        <Link
-          to="/app"
-          className="fixed bottom-4 right-4 rounded-full bg-rose-500 text-white px-4 py-2 shadow-lg hover:bg-rose-600"
-        >
-          ホーム
-        </Link>
-      )}
     </>
   );
 }

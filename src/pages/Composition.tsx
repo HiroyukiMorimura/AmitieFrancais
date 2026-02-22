@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import type { MenuId } from "../lib/metricsClient";
 import {
@@ -491,12 +492,16 @@ export default function Composition() {
       <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
         <div className="mx-auto max-w-5xl px-4 py-3 flex flex-wrap gap-3 items-center justify-between">
           <h1 className="text-lg font-bold">📝 仏作文</h1>
-          <div className="flex items-center gap-3 text-sm text-slate-600">
-            <span>
-              正答 {totalCorrect} / {totalTried}（{acc}%）
-            </span>
+          <div className="flex items-center gap-2">
+            <ModeToggle mode={mode} setMode={setMode} />
+            {/* ホームボタン */}
+            <Link
+              to="/app"
+              className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-100 transition-colors"
+            >
+              🏠 ホーム
+            </Link>
           </div>
-          <ModeToggle mode={mode} setMode={setMode} />
         </div>
       </header>
 
@@ -506,6 +511,9 @@ export default function Composition() {
           <div className="glass-card flex items-center justify-between">
             <div className="text-sm text-slate-500">
               収録数：{loadingPairs ? "…" : pairs.length} 件
+            </div>
+            <div className="text-sm text-slate-600">
+              正答 {totalCorrect} / {totalTried}（{acc}%）
             </div>
           </div>
         </section>
@@ -677,7 +685,7 @@ function DrillView({
   onWrong: () => void;
 }) {
   // 音声読み上げ機能（Hooksは条件分岐の前に呼び出す必要がある）
-  const { speak, isSupported } = useTextToSpeech({ lang: "fr-FR" });
+  const { speak, isSupported, hasVoice } = useTextToSpeech({ lang: "fr-FR" });
 
   const handleSpeak = () => {
     if (card && isSupported) {
@@ -696,6 +704,11 @@ function DrillView({
       <div className="text-sm text-slate-500">
         {idx + 1} / {total}（正解 {stat.correct}・間違い {stat.wrong}）
       </div>
+      {isSupported && hasVoice === false && (
+        <div className="mt-2 text-xs text-center text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+          ⚠️ フランス語音声が見つかりません。Chromeの使用またはOSの言語設定からフランス語を追加してください。
+        </div>
+      )}
 
       <div className="mt-3 rounded-2xl border bg-white shadow p-6">
         <div className="text-center">

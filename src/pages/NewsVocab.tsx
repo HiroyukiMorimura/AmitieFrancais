@@ -1,5 +1,6 @@
 // src/pages/NewsVocab.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import type { UIModuleId } from "../lib/metricsClient";
 
@@ -763,13 +764,7 @@ export default function NewsVocab() {
         <div className="mx-auto max-w-5xl px-4 py-3 flex flex-wrap gap-3 items-center justify-between">
           <h1 className="text-lg font-bold">📰 時事単語</h1>
 
-          <div className="flex items-center gap-3 text-sm text-slate-600">
-            <span>
-              正答 {totalCorrect} / {totalTried}（{acc}%）
-            </span>
-          </div>
-
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             {/* モード切替 */}
             <div className="inline-flex rounded-xl border bg-white shadow-sm overflow-hidden">
               <button
@@ -825,6 +820,14 @@ export default function NewsVocab() {
                 </button>
               </div>
             )}
+
+            {/* ホームボタン */}
+            <Link
+              to="/app"
+              className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-100 transition-colors"
+            >
+              🏠 ホーム
+            </Link>
           </div>
         </div>
       </header>
@@ -906,6 +909,9 @@ export default function NewsVocab() {
               <div className="text-xs text-slate-500">
                 語彙数：{loadingPairs ? "…" : pairs.length} 件
               </div>
+            </div>
+            <div className="text-sm text-slate-600">
+              正答 {totalCorrect} / {totalTried}（{acc}%）
             </div>
           </div>
         </section>

@@ -79,7 +79,7 @@ export default function Login() {
                 className="input bg-slate-50 placeholder:text-slate-400 placeholder:opacity-80"
                 type="email"
                 value={email}
-                placeholder=""
+                placeholder="demo@lingua.app"
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="email"
               />
@@ -90,7 +90,7 @@ export default function Login() {
                 className="input bg-slate-50 placeholder:text-slate-400 placeholder:opacity-80"
                 type="password"
                 value={password}
-                placeholder=""
+                placeholder="demo1234"
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
               />

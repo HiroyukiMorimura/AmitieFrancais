@@ -289,8 +289,13 @@ export default function Hub() {
           <h1 className="text-3xl md:text-4xl font-bold text-slate-800 mb-3">
             Bonjour, <span className="text-rose-400">{displayName}</span>!
           </h1>
-          <p className="text-slate-500 mb-10">
-            今日も楽しくフランス語に触れましょう 🇫🇷
+          <p className="text-slate-500 mb-10 flex items-center justify-center gap-1.5">
+            今日も楽しくフランス語に触れましょう
+            <svg viewBox="0 0 3 2" className="w-5 h-auto rounded-sm shadow-sm" aria-label="フランス国旗">
+              <rect width="1" height="2" fill="#0055A4" />
+              <rect x="1" width="1" height="2" fill="#FFFFFF" />
+              <rect x="2" width="1" height="2" fill="#EF4135" />
+            </svg>
           </p>
 
           {/* 統計バッジ */}
